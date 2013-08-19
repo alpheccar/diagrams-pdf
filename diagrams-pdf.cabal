@@ -7,6 +7,7 @@ license-file:        LICENSE
 Extra-source-files:  README.md, CHANGES.md
 author:              alpheccar
 maintainer:          misc@alpheccar.org
+Bug-reports:         http://github.com/alpheccar/diagrams-pdf/issues
 Stability:           Experimental
 copyright:           2013, alpheccar.org         
 category:            Graphics
@@ -31,6 +32,10 @@ Description:         This package provides a modular backend for rendering
                      .
                      Additional documentation can be found in the
                      README file distributed with the source tarball
+Source-repository head
+  type:     git
+  location: http://github.com/alpheccar/diagrams-pdf
+
 library
   Exposed-modules:     Diagrams.Backend.Pdf
                        Diagrams.Backend.Pdf.CmdLine     
