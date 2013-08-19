@@ -1,5 +1,5 @@
 name:                diagrams-pdf
-version:             0.1.0.0
+version:             0.2.0
 synopsis:            PDF backend for diagrams drawing EDSL
 homepage:            http://www.alpheccar.org
 license:             BSD3

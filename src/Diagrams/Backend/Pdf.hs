@@ -145,7 +145,15 @@ End of the specific part
 -- Fill is disabled when transparency is total (color transparency and not diagram transparency)
 -- Stroke is disabled when line width is 0 because in the PDF specification
 -- line width 0 means the smallest width and something is displayed.
-data DrawingState = DrawingState FontSlant FontWeight  Int FillRule P.Point Bool Bool
+data DrawingState = DrawingState { _fontSlant :: FontSlant
+                                 , _fontWeight :: FontWeight
+                                 , _fontSize :: Int
+                                 , _fillRule :: FillRule 
+                                 , _currentPoint :: P.Point 
+                                 , _mustFill :: Bool
+                                 , _mustStroke :: Bool
+                                 , _isloop :: Bool
+                               }
 
 -- | The stack of drawing state
 data StateStack = StateStack { _current :: DrawingState
@@ -155,9 +163,15 @@ data StateStack = StateStack { _current :: DrawingState
 defaultFontSize :: Num a => a
 defaultFontSize = 1 
 
+diagramDefaultUnit :: Fractional a => a 
+diagramDefaultUnit = 0.01 
+
+defaultWidth :: Fractional a => a 
+defaultWidth = 0.01
+
 -- | Initial drawing state
 initState :: StateStack
-initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) False True) []
+initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) False True False) []
 
 
 -- | The drawing monad with state
@@ -178,55 +192,55 @@ runDS d = S.evalStateT (unDS d) initState
 
 -- | Generate an HPDF font
 mkFont :: DrawingState -> PDFFont 
-mkFont (DrawingState FontSlantNormal FontWeightNormal s _ _ _ _) = PDFFont Times_Roman s
-mkFont (DrawingState FontSlantNormal FontWeightBold s _ _ _ _) = PDFFont Times_Bold s
-mkFont (DrawingState FontSlantItalic FontWeightNormal s _ _ _ _) = PDFFont Times_Italic s
-mkFont (DrawingState FontSlantItalic FontWeightBold s _ _ _ _) = PDFFont Times_BoldItalic s
-mkFont (DrawingState FontSlantOblique FontWeightNormal s _ _ _ _) = PDFFont Helvetica_Oblique s
-mkFont (DrawingState FontSlantOblique FontWeightBold s _ _ _ _) = PDFFont Helvetica_BoldOblique s
+mkFont (DrawingState FontSlantNormal FontWeightNormal s _ _ _ _ _) = PDFFont Times_Roman s
+mkFont (DrawingState FontSlantNormal FontWeightBold s _ _ _ _ _) = PDFFont Times_Bold s
+mkFont (DrawingState FontSlantItalic FontWeightNormal s _ _ _ _ _) = PDFFont Times_Italic s
+mkFont (DrawingState FontSlantItalic FontWeightBold s _ _ _ _ _) = PDFFont Times_BoldItalic s
+mkFont (DrawingState FontSlantOblique FontWeightNormal s _ _ _ _ _) = PDFFont Helvetica_Oblique s
+mkFont (DrawingState FontSlantOblique FontWeightBold s _ _ _ _ _) = PDFFont Helvetica_BoldOblique s
 
 
 
 setFontSize :: Double -> DrawS ()
 setFontSize fs = do 
   let s = floor fs
-  StateStack (DrawingState fsl fw _ wr p f st) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw s wr p f st) l
+  StateStack (DrawingState fsl fw _ wr p f st ilp) l <- S.get 
+  S.put $! StateStack (DrawingState fsl fw s wr p f st ilp) l
 
 setFontWeight :: FontWeight -> DrawS ()
 setFontWeight w = do 
-  StateStack (DrawingState fsl _ fs wr p f st) l <- S.get 
-  S.put $! StateStack (DrawingState fsl w fs wr p f st) l
+  StateStack (DrawingState fsl _ fs wr p f st ilp) l <- S.get 
+  S.put $! StateStack (DrawingState fsl w fs wr p f st ilp) l
   
 
 setFontSlant :: FontSlant -> DrawS ()
 setFontSlant sl = do 
-  StateStack (DrawingState _ fw fs wr p f st) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st) l
+  StateStack (DrawingState _ fw fs wr p f st ilp) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
   
 setFillRule :: FillRule -> DrawS ()
 setFillRule wr = do 
-  StateStack (DrawingState sl fw fs _ p f st) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st) l
+  StateStack (DrawingState sl fw fs _ p f st ilp) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
 
 savePoint :: P.Point -> DrawS () 
 savePoint p = do 
-  StateStack (DrawingState sl fw fs wr _ f st) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st) l
+  StateStack (DrawingState sl fw fs wr _ f st ilp) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
 
 currentPoint :: DrawS P.Point 
 currentPoint = do 
-  StateStack (DrawingState _ _ _ _ p _ _) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ p _ _ _) _ <- S.get 
   return p 
 
 getFillState :: DrawS FillRule 
 getFillState = do 
-  StateStack (DrawingState _ _ _ w _ _ _) _ <- S.get 
+  StateStack (DrawingState _ _ _ w _ _ _ _) _ <- S.get 
   return w
 
 mustFill :: DrawS Bool 
 mustFill = do
-  StateStack (DrawingState _ _ _ _ _ b _) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ _ b _ _) _ <- S.get 
   return b
 
 -- | From the alpha value of a fill color, we check if the filling must be disabled
@@ -234,12 +248,12 @@ setFillingColor :: Double -> DrawS()
 setFillingColor alpha = do 
     let b | alpha /= 0.0 = True 
           | otherwise = False
-    StateStack (DrawingState fsl w fs wr p _ st) l <- S.get 
-    S.put $! StateStack (DrawingState fsl w fs wr p b st) l
+    StateStack (DrawingState fsl w fs wr p _ st ilp) l <- S.get 
+    S.put $! StateStack (DrawingState fsl w fs wr p b st ilp) l
 
 mustStroke :: DrawS Bool
 mustStroke = do 
-  StateStack (DrawingState _ _ _ _ _ _ b) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ _ _ b _) _ <- S.get 
   return b
 
 -- | From the linew width we check if stroke must be disabled
@@ -247,17 +261,42 @@ setTrokeState :: Double -> DrawS ()
 setTrokeState w = do 
   let st | w == 0 = False 
          | otherwise = True
-  StateStack (DrawingState fsl fw fs wr p b _) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw fs wr p b st) l
+  StateStack (DrawingState fsl fw fs wr p b _ ilp) l <- S.get 
+  S.put $! StateStack (DrawingState fsl fw fs wr p b st ilp) l
 
+isALoop :: DrawS Bool 
+isALoop = do 
+  StateStack s _ <- S.get
+  return $ _isloop s
+
+setLoop :: Bool -> DrawS () 
+setLoop b = do 
+  StateStack s l <- S.get
+  S.put $! StateStack (s {_isloop = b}) l
 
 -- | Initial settings before rendering the diagram
 setTranform :: Draw () -> Draw ()
 setTranform d = do
      P.fillColor P.white 
      P.strokeColor P.black
-     P.setWidth 0.1
+     P.setWidth defaultWidth
      d
+
+strokeOrFill :: DrawS () 
+strokeOrFill = do 
+  mf <- mustFill
+  ms <- mustStroke 
+  fs <- getFillState
+  isloop <- isALoop
+  -- Set the diagram opacity in a new PDF context
+  case (ms,mf,fs,isloop) of 
+       (True,True,Winding,True) -> drawM (P.fillAndStrokePath)
+       (True,True,EvenOdd,True) -> drawM (P.fillAndStrokePathEO)
+       (False,True,Winding,True) -> drawM (P.fillPath)
+       (False,True,EvenOdd,True) -> drawM (P.fillPathEO)
+       (True,_,_,_) -> drawM (P.strokePath) 
+       (_,_,_,_) -> return ()
+  setLoop True
 
 instance Backend Pdf R2 where
   data Render  Pdf R2 = D (DrawS ())
@@ -272,32 +311,23 @@ instance Backend Pdf R2 where
   withStyle _ s t (D r) = D $ do
     withContext $ do
        pdfMiscStyle s
-       pdfFrozenStyle s
-       pdfTransf t
-       fs <- getFillState
        mf <- mustFill
        ms <- mustStroke 
        -- Set the clip region into a new PDF context
        -- since it is the only way to restore the old clip region
        -- (by popping the PDF stack of contexts)
+       pdfTransf t
        withClip s $ do
-          when (mf || ms) r
-   
-          -- Set the diagram opacity in a new PDF context
-          withPdfOpacity s $ do
-             case (ms,mf,fs) of 
-               (True,True,Winding) -> drawM (P.fillAndStrokePath)
-               (True,True,EvenOdd) -> drawM (P.fillAndStrokePathEO)
-               (False,True,Winding) -> drawM (P.fillPath)
-               (False,True,EvenOdd) -> drawM (P.fillPathEO)
-               (True,False,_) -> drawM (P.strokePath) 
-               (False,False,_) -> return ()
-          
+          pdfFrozenStyle s
+          when (mf || ms) $ do 
+            withPdfOpacity s $ do
+               r
+               strokeOrFill
 
   doRender _ _ (D r) = setTranform (runDS r)
 
   renderDia Pdf opts d =
-    doRender Pdf opts' . mconcat . map renderOne . prims $ d'
+    centerAndScale opts d . doRender Pdf opts' . mconcat . map renderOne . prims $ d'
       where (opts', d') = adjustDia Pdf opts d
             renderOne :: (Prim Pdf R2, (Split (Transformation R2), Style R2))
                       -> Render Pdf R2
@@ -308,6 +338,26 @@ instance Backend Pdf R2 where
               -- Here is the difference from the default
               -- implementation: "t2" instead of "t1 <> t2".
               = withStyle Pdf s t1 (render Pdf (transform t2 p))
+            centerAndScale opts diag renderedDiagram  = do
+                let bd = boundingBox diag
+                    (w,h) = sizeFromSpec (pdfsizeSpec opts)
+                    rescaledD (Just (ll,ur)) =
+                                let (vx,vy) = unp2 $ centroid [ll,ur]
+                                    (xa,ya) = unp2 ll 
+                                    (xb,yb) = unp2 ur 
+                                    ps = max (abs (xb - xa)) (abs (yb - ya))
+                                    sx = w / ps
+                                    sy = h / ps
+                                    pageCenter = (w / 2.0) P.:+ (h/2.0)
+                                in
+                                do
+                                  P.applyMatrix (P.translate pageCenter) 
+                                  P.applyMatrix (P.scale sx sy)
+                                  P.applyMatrix (P.translate $ (-vx) P.:+ (-vy))
+                    rescaledD Nothing = return ()
+                rescaledD (getCorners bd)
+                P.withNewContext $ do
+                  renderedDiagram
 
 instance Monoid (Render Pdf R2) where
   mempty  = D (return ())
@@ -403,7 +453,9 @@ pdfLineCap LineCapRound = RoundCap
 pdfLineCap LineCapSquare = SquareCap
 
 pdfDashing :: Dashing -> DashPattern 
-pdfDashing (Dashing l a) = DashPattern l a
+pdfDashing (Dashing l a) = DashPattern (map convert l) (convert a)
+  where 
+    convert x = defaultWidth * x / diagramDefaultUnit
 
 {-
 
@@ -481,7 +533,7 @@ pdfFrozenStyle s = sequence_ -- foldr (>>) (return ())
         handle f = f `fmap` getAttr s
         lWidth w = do 
           let d = getLineWidth w
-          drawM . setWidth $ d
+          drawM . setWidth $ (defaultWidth * d / diagramDefaultUnit)
           setTrokeState d
         lCap = drawM . setLineCap . pdfLineCap . getLineCap
         lJoin = drawM . setLineJoin . pdfLineJoin . getLineJoin
@@ -516,6 +568,7 @@ instance Renderable (Trail R2) Pdf where
         do
           mapM_ renderC segs
           when (isLoop t) (drawM closePath)
+          setLoop (isLoop t)
 
 instance Renderable (Path R2) Pdf where
   render _ (Path t) = D $ do

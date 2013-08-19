@@ -7,6 +7,7 @@ import Data.Colour (withOpacity)
 import Graphics.PDF(Orientation(..), Justification(..))
 import qualified Diagrams.Backend.SVG.CmdLine as S
 import qualified Diagrams.Example.Logo as L
+import           Diagrams.Coordinates ((&))
 
 diag = mconcat [ circle 0.1 # fc green
                , triangle 1 # scale 0.4 # fc yellow
@@ -52,8 +53,18 @@ ts  = [ scale (1/2), id, scale 2,    scaleX 2,    scaleY 2
 
 example6 = hcat . map (eff1 #) $ ts
 
+testatt = 
+    let path = fromVertices (map p2 [(0,0), (1,0.3), (2,0), (2.2,0.3)]) # lw 0.1
+    in pad 1.1 . centerXY . vcat' with { sep = 0.1 }
+              $ map (path #)
+                [ lineCap LineCapButt   . lineJoin LineJoinMiter
+                , lineCap LineCapRound  . lineJoin LineJoinRound
+                , lineCap LineCapSquare . lineJoin LineJoinBevel
+                , dashing [0.1,0.2,0.3,0.1] 0
+                ]
+
 b1 = square 20 # lw 0.002
 
 main = do
-	multipleMain $ [L.logo,pad 1.1 . centerXY $ example4]
+	multipleMain $ [testatt,L.logo,pad 1.1 . centerXY $ example4, example2,example]
 	--S.defaultMain (circle 1.0 # fc blue)

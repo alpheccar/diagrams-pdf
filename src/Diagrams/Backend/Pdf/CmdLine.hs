@@ -16,7 +16,6 @@
 module Diagrams.Backend.Pdf.CmdLine
        ( defaultMain
        , multipleMain
-       , renderDia'
        , Pdf
        ) where
 
@@ -123,7 +122,7 @@ defaultMain d = do
     P.runPdf (output opts) 
            (P.standardDocInfo { P.author=P.toPDFString theAuthor, P.compressed = compression}) docRect $ do
               page1 <- P.addPage Nothing
-              P.drawWithPage page1 $ renderDia' d pdfOpts
+              P.drawWithPage page1 $ renderDia Pdf pdfOpts d
 
 -- | Generate a multipage PDF document from several diagrams.
 -- Each diagram is scaled to the page size
@@ -144,7 +143,7 @@ multipleMain d = do
       pdfOpts = PdfOptions sizeSpec
       createPage aDiag = do 
         page1 <- P.addPage Nothing
-        P.drawWithPage page1 $ renderDia' aDiag pdfOpts
+        P.drawWithPage page1 $ renderDia Pdf pdfOpts aDiag 
   ifCanRender opts $ do 
     P.runPdf (output opts) 
            (P.standardDocInfo { P.author=P.toPDFString theAuthor, P.compressed = compression}) docRect $ do
@@ -159,21 +158,3 @@ ifCanRender opts action =
     ps |  last ps `elem` ["pdf"] -> action
        | otherwise -> putStrLn $ "Unknown file type: " ++ last ps
 
-renderDia' :: Diagram Pdf R2 -- ^ Diagram to be rendered
-           -> Options Pdf R2 -- ^ PDF Options
-           -> P.Draw () -- ^ Draw monad to include in a PDF document
-renderDia' diag opts = do
-  let bd = boundingBox diag
-      (w,h) = sizeFromSpec (pdfsizeSpec opts)
-      rescaledD (Just (ll,ur)) =
-                  let v = r2 . unp2 $ centroid [ll,ur]
-                      (xa,ya) = unp2 ll 
-                      (xb,yb) = unp2 ur 
-                      ps = max (abs (xb - xa)) (abs (yb - ya))
-                      sx = w / ps
-                      sy = h / ps
-                      pageCenter = r2 (w / 2.0, h/2.0)
-                  in
-                  translate pageCenter . scaleX sx . scaleY sy . translate (-v) $ diag
-      rescaledD Nothing = diag
-  renderDia Pdf opts (rescaledD (getCorners bd))
