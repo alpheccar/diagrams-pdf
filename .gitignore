@@ -1,0 +1,6 @@
+*.o
+*.hi
+*.pdf
+*.svg
+dist
+mytest
