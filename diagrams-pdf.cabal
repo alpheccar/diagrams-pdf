@@ -1,5 +1,5 @@
 name:                diagrams-pdf
-version:             0.2.0
+version:             0.3
 synopsis:            PDF backend for diagrams drawing EDSL
 homepage:            http://www.alpheccar.org
 license:             BSD3
@@ -39,7 +39,7 @@ Source-repository head
 library
   Exposed-modules:     Diagrams.Backend.Pdf
                        Diagrams.Backend.Pdf.CmdLine     
-  -- other-modules:       
+  other-modules:       Diagrams.Backend.Pdf.Specific
   build-depends:       base >= 4.6 && < 4.8,
                        mtl >= 2.1 && < 2.2 ,
                        monoid-extras >= 0.3 && < 0.4,

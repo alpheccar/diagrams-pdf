@@ -4,7 +4,7 @@ import Diagrams.Prelude
 import Diagrams.Backend.Pdf
 import Diagrams.Backend.Pdf.CmdLine
 import Data.Colour (withOpacity)
-import Graphics.PDF(Orientation(..), Justification(..))
+import Graphics.PDF(Orientation(..), Justification(..),FontName(..))
 import qualified Diagrams.Backend.SVG.CmdLine as S
 import qualified Diagrams.Example.Logo as L
 import           Diagrams.Coordinates ((&))
@@ -65,6 +65,23 @@ testatt =
 
 b1 = square 20 # lw 0.002
 
+testpdftext = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
+ where 
+  simple = t "Top Left" BottomLeftCorner LeftJustification ||| square 50
+  squareText = (t "Top Left" TopLeftCorner LeftJustification ||| t "Top" TopSide Centered ||| t "Top Right" TopRightCorner RightJustification)
+               ===
+               (t "Left" LeftSide LeftJustification ||| t "Center" Center Centered ||| t "Right" RightSide RightJustification)
+               ===
+               (t "Bottom Left" BottomLeftCorner LeftJustification ||| t "Bottom" BottomSide Centered ||| t "Bottom Right" BottomRightCorner RightJustification)
+  t s x j = 
+    let (td, rd) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 12 j x (SomeColor blue)) s 50 100 
+    in 
+    td # showOrigin # lw 0.03  <> rd
+        
+  pt = circle 0.1 # fc red
+  t1 = pt <> t "Top Left" TopLeftCorner LeftJustification  <> rect 100 50
+
 main = do
-	multipleMain $ [testatt,L.logo,pad 1.1 . centerXY $ example4, example2,example]
+	-- multipleMain $ [testatt,L.logo,pad 1.1 . centerXY $ example4, example2,example]
+  defaultMain testpdftext
 	--S.defaultMain (circle 1.0 # fc blue)

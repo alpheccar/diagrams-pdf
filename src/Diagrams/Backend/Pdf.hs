@@ -36,6 +36,10 @@ module Diagrams.Backend.Pdf
     Pdf(..)
   , Options(..)
   , sizeFromSpec
+  , pdfLabelWithSuggestedSize
+  , LabelStyle(..)
+  , TextOrigin(..)
+  , LabelSize
   ) where
 
 
@@ -51,89 +55,17 @@ import           Data.Maybe                    (catMaybes)
 
 import qualified Data.Foldable                 as F
 import           Data.Monoid.Split
-import           Data.Typeable
 import qualified Control.Monad.State.Strict as S
 import Control.Monad.Trans(lift)
 import Diagrams.TwoD.Path
 import Control.Monad(when)
+import Diagrams.Backend.Pdf.Specific
+import           Data.Typeable
+import qualified Diagrams.TwoD.Shapes as Sh
 
 -- | This data declaration is simply used as a token to distinguish this rendering engine.
 data Pdf = Pdf
     deriving (Eq,Ord,Read,Show,Typeable)
-
-{-
- 
-For a future release to support some specific HPDF features
-
--}
-{-
-data LabelStyle = LabelStyle Int Justification P.Orientation 
-
-data TextBox = TextBox T2 Double Double LabelStyle String
-
-type instance V TextBox = R2
-
-instance Transformable TextBox where
-  transform t (TextBox tt w h a s) = TextBox (t <> tt) w h a s
-
-instance IsPrim TextBox
-
-instance HasOrigin TextBox where
-  moveOriginTo p = translate (origin .-. p)
-
-instance Renderable TextBox NullBackend where
-  render _ _ = mempty
-
-pdfText :: (Renderable TextBox b) 
-        => LabelStyle 
-        -> String 
-        -> Double 
-        -> Double 
-        -> Diagram b R2
-pdfText ls s w h = mkQD (Prim (TextBox mempty w h ls s))
-                         (getEnvelope r)
-                         (getTrace r)
-                         mempty
-                         (Query $ \p -> Any (isInsideEvenOdd p r))
-
-  where r :: Path R2
-        r = rect w h
-
-drawStringLabel :: LabelStyle 
-                -> String 
-                -> PDFFloat 
-                -> PDFFloat 
-                -> PDFFloat 
-                -> PDFFloat 
-                -> Draw () 
-drawStringLabel (LabelStyle fs j o) s x y w h = do
-  let (r,b) = drawTextBox x y w h o NormalParagraph (P.Font (PDFFont Times_Roman fs) P.black P.black) $ do
-                setJustification j
-                paragraph $ do
-                    txt $ s
-  b
-
-instance Renderable TextBox Pdf where
-  render _ (TextBox t w h ls text) = D $ do
-    let r :: Path R2
-        r = rect w h 
-        r' = transform t r 
-        b = boundingBox r' 
-        corners = getCorners b 
-    case corners of 
-       Just (a,b) -> do 
-        let (xa,ya) = unp2 a 
-            (xb,yb) = unp2 b
-        drawM $ P.stroke $ Rectangle (xa :+ ya) (xb :+ yb) 
-        drawM (drawStringLabel ls text xa ya (xb-xa) (yb-ya)) 
-       Nothing -> return() 
--}
-
-{-
- 
-End of the specific part
-
--}
 
 -- | The drawing state
 -- I should give a name to the different fields and use lens
@@ -327,7 +259,7 @@ instance Backend Pdf R2 where
   doRender _ _ (D r) = setTranform (runDS r)
 
   renderDia Pdf opts d =
-    centerAndScale opts d . doRender Pdf opts' . mconcat . map renderOne . prims $ d'
+    centerAndScale d . doRender Pdf opts' . mconcat . map renderOne . prims $ d'
       where (opts', d') = adjustDia Pdf opts d
             renderOne :: (Prim Pdf R2, (Split (Transformation R2), Style R2))
                       -> Render Pdf R2
@@ -338,7 +270,7 @@ instance Backend Pdf R2 where
               -- Here is the difference from the default
               -- implementation: "t2" instead of "t1 <> t2".
               = withStyle Pdf s t1 (render Pdf (transform t2 p))
-            centerAndScale opts diag renderedDiagram  = do
+            centerAndScale diag renderedDiagram  = do
                 let bd = boundingBox diag
                     (w,h) = sizeFromSpec (pdfsizeSpec opts)
                     rescaledD (Just (ll,ur)) =
@@ -596,4 +528,71 @@ instance Renderable Text Pdf where
               P.applyMatrix (P.translate (x' :+ y'))
               P.drawText $ P.text theFont 0 0 (toPDFString str)
             
+{-
 
+Rendering of specific HPDF primitives
+
+-}
+
+instance Renderable TextBox Pdf where
+  render _ (TextBox t sw sh _ _ ls theText) = D $ do
+    withContext $ do
+       pdfTransf t
+       drawM (drawStringLabel ls theText 0 0 sw sh)
+
+pdfLabelWithSuggestedSize :: (Renderable TextBox Pdf,Renderable (Path R2) Pdf) 
+                          => LabelStyle 
+                          -> String 
+                          -> Double 
+                          -> Double 
+                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect
+pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h = 
+    let diag = mkQD (Prim (TextBox mempty w h wlinewrap hlinewrap ls s))
+                    (getEnvelope r)
+                    (getTrace r)
+                    mempty
+                    (Query $ \p -> Any (isInsideEvenOdd p r))
+        f v = (moveOriginTo v diag, moveOriginTo v textBounds)
+    in
+    case o of 
+            LeftSide -> f east 
+                  where 
+                    east = p2 (0,-hlinewrap / 2.0)
+            RightSide -> f west 
+                  where 
+                    west = p2 (wlinewrap,-hlinewrap / 2.0)
+            Center -> f theCenter
+                  where 
+                    theCenter = p2 (wlinewrap / 2.0,-hlinewrap / 2.0)
+            TopSide -> f topSide 
+                  where 
+                    topSide = p2 (wlinewrap / 2.0,0)
+            BottomSide -> f bottomSide 
+                  where 
+                    bottomSide = p2 (wlinewrap / 2.0,-hlinewrap)
+            TopLeftCorner -> f topLeft 
+                  where 
+                    topLeft = p2 (0,0)
+            BottomLeftCorner -> f bottomLeft
+                  where 
+                    bottomLeft = p2 (0,-hlinewrap )
+            TopRightCorner -> f topRight
+                  where 
+                    topRight = p2 (wlinewrap,0)
+            BottomRightCorner -> f bottomRight
+                  where 
+                    bottomRight = p2 (wlinewrap,-hlinewrap )
+        
+  where wlinewrap :: Double 
+        hlinewrap :: Double
+        Rectangle (xa :+ ya) (xb :+ yb) = getTextBoundingBox 0 0 w h NormalParagraph (P.Font (PDFFont fn fs) P.black P.black) $ (do
+                                           setJustification j
+                                           paragraph $ do
+                                               txt $ s)
+        wlinewrap = xb - xa
+        hlinewrap = yb - ya
+   
+        r :: Path R2
+        r = rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
+        textBounds :: Diagram Pdf R2
+        textBounds = Sh.rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
