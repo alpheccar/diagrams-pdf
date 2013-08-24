@@ -4,7 +4,7 @@ import Diagrams.Prelude
 import Diagrams.Backend.Pdf
 import Diagrams.Backend.Pdf.CmdLine
 import Data.Colour (withOpacity)
-import Graphics.PDF(Orientation(..), Justification(..),FontName(..))
+import Graphics.PDF hiding(scale,red,green,blue,text,rotate)
 import qualified Diagrams.Backend.SVG.CmdLine as S
 import qualified Diagrams.Example.Logo as L
 import           Diagrams.Coordinates ((&))
@@ -65,6 +65,11 @@ testatt =
 
 b1 = square 20 # lw 0.002
 
+t s x j = 
+    let (td, rd) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 12 j x blue) s 50 100 
+    in 
+    td # showOrigin # lw 0.03  <> rd
+
 testpdftext = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
  where 
   simple = t "Top Left" BottomLeftCorner LeftJustification ||| square 50
@@ -73,15 +78,30 @@ testpdftext = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
                (t "Left" LeftSide LeftJustification ||| t "Center" Center Centered ||| t "Right" RightSide RightJustification)
                ===
                (t "Bottom Left" BottomLeftCorner LeftJustification ||| t "Bottom" BottomSide Centered ||| t "Bottom Right" BottomRightCorner RightJustification)
-  t s x j = 
-    let (td, rd) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 12 j x (SomeColor blue)) s 50 100 
-    in 
-    td # showOrigin # lw 0.03  <> rd
+  
         
   pt = circle 0.1 # fc red
   t1 = pt <> t "Top Left" TopLeftCorner LeftJustification  <> rect 100 50
 
+testPict p = ((p # showOrigin <> rect 60 57) ||| (square 100 # lc blue)) <> rect 600 400 <> pdfURL "http://www.alpheccar.org" 100 100
+  <> t "Top Left" TopLeftCorner LeftJustification
+
+testPict2 :: Diagram Pdf R2 -> Diagram Pdf R2
+testPict2 p = ((p # showOrigin <> pdfURL "http://www.alpheccar.org" 60 57) ||| square 100 # showOrigin # lc blue) <> rect 600 400
+
+testShading :: Diagram Pdf R2
+testShading = square 100 # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue red  <> rect 600 400
+
+testRadialShading :: Diagram Pdf R2
+testRadialShading = square 100 # pdfRadialShading (p2 (0,0)) 20 (p2 (0,0)) 50 blue red  <> rect 600 400
+
 main = do
-	-- multipleMain $ [testatt,L.logo,pad 1.1 . centerXY $ example4, example2,example]
-  defaultMain testpdftext
-	--S.defaultMain (circle 1.0 # fc blue)
+  Right jpgf <- readJpegFile "logo.jpg" 
+  let rect = PDFRect 0 0 600 400
+  runPdf "circle.pdf" (standardDocInfo { author=toPDFString "alpheccar", compressed = False}) rect $ do
+      --jpg <- createPDFJpeg jpgf
+      page1 <- addPage Nothing
+      drawWithPage page1 $ do
+        --p <- pdfImage jpg
+        renderDia Pdf (PdfOptions (Dims 600 400)) $ (example4 :: Diagram Pdf R2)
+          --testpdftext

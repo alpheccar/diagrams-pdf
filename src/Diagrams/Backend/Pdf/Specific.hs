@@ -2,20 +2,30 @@
 {-# LANGUAGE MultiParamTypeClasses     #-}
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE DeriveDataTypeable        #-}
+{-# LANGUAGE GeneralizedNewtypeDeriving #-}
 module Diagrams.Backend.Pdf.Specific(
       LabelStyle(..)
-    , TextBox(..)
+    , PdfTextBox(..)
     , drawStringLabel
     , getTextBoundingBox
     , TextOrigin(..)
     , LabelSize
+    , PdfImage(..)
+    , PdfURL(..)
+    , PdfShadingData(..)
+    , getShadingData
+    , pdfAxialShading
+    , pdfRadialShading
     ) where 
 
 import Graphics.PDF hiding(translate)
 import qualified Graphics.PDF as P
 import Diagrams.Prelude
+import Data.Typeable
 
+--import qualified Debug.Trace as T 
 
+--debug a = T.trace (show a) a
 
 data TextOrigin = Center 
                 | LeftSide 
@@ -31,31 +41,59 @@ data TextOrigin = Center
 type LabelSize = Int
 
 -- | Alpha channel for color is not taken into account in the setting
-data LabelStyle = LabelStyle FontName LabelSize Justification TextOrigin SomeColor
+data LabelStyle = LabelStyle FontName LabelSize Justification TextOrigin (Colour Double)
 
-data TextBox = TextBox { _transform :: T2 
-                       , _suggestedWidth :: Double 
-                       , _suggestedHeight :: Double 
-                       , _computedWidth :: Double 
-                       , _computedHeight :: Double
-                       , _style :: LabelStyle 
-                       , _text :: String
-                       }
+data PdfTextBox = PdfTextBox { _transform :: T2 
+                             , _suggestedWidth :: Double 
+                             , _suggestedHeight :: Double 
+                             , _computedWidth :: Double 
+                             , _computedHeight :: Double
+                             , _style :: LabelStyle 
+                             , _text :: String
+                             }
 
-type instance V TextBox = R2
+type instance V PdfTextBox = R2
 
-instance Transformable TextBox where
-  transform t (TextBox tt sw sh cw ch a s) = TextBox (t <> tt) sw sh cw ch a s
+instance Transformable PdfTextBox where
+  transform t (PdfTextBox tt sw sh cw ch a s) = PdfTextBox (t <> tt) sw sh cw ch a s
 
-instance IsPrim TextBox
+instance IsPrim PdfTextBox
 
-instance HasOrigin TextBox where
+instance HasOrigin PdfTextBox where
   moveOriginTo p = translate (origin .-. p)
 
-instance Renderable TextBox NullBackend where
+instance Renderable PdfTextBox NullBackend where
   render _ _ = mempty
 
+data PdfImage = PdfImage T2 (PDFReference PDFJpeg)
 
+type instance V PdfImage = R2
+
+instance Transformable PdfImage where
+  transform t (PdfImage tt ref) = PdfImage (t <> tt) ref
+
+instance IsPrim PdfImage
+
+instance HasOrigin PdfImage where
+  moveOriginTo p = translate (origin .-. p)
+
+instance Renderable PdfImage NullBackend where
+  render _ _ = mempty
+
+data PdfURL = PdfURL T2 String Double Double 
+
+type instance V PdfURL = R2
+
+instance Transformable PdfURL where
+  transform t (PdfURL tt s w h) = PdfURL (t <> tt) s w h
+
+instance IsPrim PdfURL
+
+instance HasOrigin PdfURL where
+  moveOriginTo p = translate (origin .-. p)
+
+instance Renderable PdfURL NullBackend where
+  render _ _ = mempty
 
 drawStringLabel :: LabelStyle 
                 -> String 
@@ -104,4 +142,30 @@ getTextBoundingBox _ _ w h  ps p t =
     containerContentRectangle  c'
 
 
-   
+data PdfShadingData = PdfAxialShadingData P2 P2 (Colour Double) (Colour Double) 
+                    | PdfRadialShadingData P2 Double P2 Double (Colour Double) (Colour Double) deriving (Show,Typeable)
+newtype PdfShading = PdfShading (Last PdfShadingData) deriving (Typeable, Semigroup)
+
+instance AttributeClass PdfShading
+
+getShadingData :: PdfShading -> PdfShadingData
+getShadingData (PdfShading (Last c)) = c
+
+addshading :: (HasStyle a) => PdfShadingData -> a -> a
+addshading s = applyAttr (PdfShading . Last $ s)
+
+
+-- | Define Axial shading for a diagram
+pdfAxialShading :: HasStyle a => P2 -> P2 -> Colour Double -> Colour Double -> a -> a
+pdfAxialShading pa pb ca cb = addshading (PdfAxialShadingData pa pb ca cb)
+
+-- | Define Radial shading for a diagram
+pdfRadialShading :: HasStyle a 
+                 => P2 -- ^ Center of inner circle
+                 -> Double -- ^ Radius of inner circle
+                 -> P2 -- ^ Center of outer circle
+                 -> Double -- ^ Radius of outer circle
+                 -> Colour Double -- ^ Inner colour
+                 -> Colour Double -- ^ Outer colour
+                 -> a -> a
+pdfRadialShading pa ra pb rb ca cb = addshading (PdfRadialShadingData pa ra pb rb ca cb)

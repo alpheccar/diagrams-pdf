@@ -40,6 +40,10 @@ module Diagrams.Backend.Pdf
   , LabelStyle(..)
   , TextOrigin(..)
   , LabelSize
+  , pdfImage
+  , pdfURL
+  , pdfAxialShading
+  , pdfRadialShading
   ) where
 
 
@@ -62,6 +66,11 @@ import Control.Monad(when)
 import Diagrams.Backend.Pdf.Specific
 import           Data.Typeable
 import qualified Diagrams.TwoD.Shapes as Sh
+import Data.Maybe(isJust)
+
+--import Debug.Trace as T
+
+--debug a = T.trace (show a) a 
 
 -- | This data declaration is simply used as a token to distinguish this rendering engine.
 data Pdf = Pdf
@@ -85,6 +94,7 @@ data DrawingState = DrawingState { _fontSlant :: FontSlant
                                  , _mustFill :: Bool
                                  , _mustStroke :: Bool
                                  , _isloop :: Bool
+                                 , _shading :: Maybe PDFShading
                                }
 
 -- | The stack of drawing state
@@ -103,7 +113,7 @@ defaultWidth = 0.01
 
 -- | Initial drawing state
 initState :: StateStack
-initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) False True False) []
+initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) False True True Nothing) []
 
 
 -- | The drawing monad with state
@@ -124,55 +134,55 @@ runDS d = S.evalStateT (unDS d) initState
 
 -- | Generate an HPDF font
 mkFont :: DrawingState -> PDFFont 
-mkFont (DrawingState FontSlantNormal FontWeightNormal s _ _ _ _ _) = PDFFont Times_Roman s
-mkFont (DrawingState FontSlantNormal FontWeightBold s _ _ _ _ _) = PDFFont Times_Bold s
-mkFont (DrawingState FontSlantItalic FontWeightNormal s _ _ _ _ _) = PDFFont Times_Italic s
-mkFont (DrawingState FontSlantItalic FontWeightBold s _ _ _ _ _) = PDFFont Times_BoldItalic s
-mkFont (DrawingState FontSlantOblique FontWeightNormal s _ _ _ _ _) = PDFFont Helvetica_Oblique s
-mkFont (DrawingState FontSlantOblique FontWeightBold s _ _ _ _ _) = PDFFont Helvetica_BoldOblique s
+mkFont (DrawingState FontSlantNormal FontWeightNormal s _ _ _ _ _ _) = PDFFont Times_Roman s
+mkFont (DrawingState FontSlantNormal FontWeightBold s _ _ _ _ _ _) = PDFFont Times_Bold s
+mkFont (DrawingState FontSlantItalic FontWeightNormal s _ _ _ _ _ _) = PDFFont Times_Italic s
+mkFont (DrawingState FontSlantItalic FontWeightBold s _ _ _ _ _ _) = PDFFont Times_BoldItalic s
+mkFont (DrawingState FontSlantOblique FontWeightNormal s _ _ _ _ _ _) = PDFFont Helvetica_Oblique s
+mkFont (DrawingState FontSlantOblique FontWeightBold s _ _ _ _ _ _) = PDFFont Helvetica_BoldOblique s
 
 
 
 setFontSize :: Double -> DrawS ()
 setFontSize fs = do 
   let s = floor fs
-  StateStack (DrawingState fsl fw _ wr p f st ilp) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw s wr p f st ilp) l
+  StateStack (DrawingState fsl fw _ wr p f st ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState fsl fw s wr p f st ilp shade) l
 
 setFontWeight :: FontWeight -> DrawS ()
 setFontWeight w = do 
-  StateStack (DrawingState fsl _ fs wr p f st ilp) l <- S.get 
-  S.put $! StateStack (DrawingState fsl w fs wr p f st ilp) l
+  StateStack (DrawingState fsl _ fs wr p f st ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState fsl w fs wr p f st ilp shade) l
   
 
 setFontSlant :: FontSlant -> DrawS ()
 setFontSlant sl = do 
-  StateStack (DrawingState _ fw fs wr p f st ilp) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
+  StateStack (DrawingState _ fw fs wr p f st ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
   
 setFillRule :: FillRule -> DrawS ()
 setFillRule wr = do 
-  StateStack (DrawingState sl fw fs _ p f st ilp) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
+  StateStack (DrawingState sl fw fs _ p f st ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
 
 savePoint :: P.Point -> DrawS () 
 savePoint p = do 
-  StateStack (DrawingState sl fw fs wr _ f st ilp) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp) l
+  StateStack (DrawingState sl fw fs wr _ f st ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
 
 currentPoint :: DrawS P.Point 
 currentPoint = do 
-  StateStack (DrawingState _ _ _ _ p _ _ _) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ p _ _ _ _) _ <- S.get 
   return p 
 
 getFillState :: DrawS FillRule 
 getFillState = do 
-  StateStack (DrawingState _ _ _ w _ _ _ _) _ <- S.get 
+  StateStack (DrawingState _ _ _ w _ _ _ _ _) _ <- S.get 
   return w
 
 mustFill :: DrawS Bool 
 mustFill = do
-  StateStack (DrawingState _ _ _ _ _ b _ _) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ _ b _ _ _) _ <- S.get 
   return b
 
 -- | From the alpha value of a fill color, we check if the filling must be disabled
@@ -180,12 +190,12 @@ setFillingColor :: Double -> DrawS()
 setFillingColor alpha = do 
     let b | alpha /= 0.0 = True 
           | otherwise = False
-    StateStack (DrawingState fsl w fs wr p _ st ilp) l <- S.get 
-    S.put $! StateStack (DrawingState fsl w fs wr p b st ilp) l
+    StateStack (DrawingState fsl w fs wr p _ st ilp shade) l <- S.get 
+    S.put $! StateStack (DrawingState fsl w fs wr p b st ilp shade) l
 
 mustStroke :: DrawS Bool
 mustStroke = do 
-  StateStack (DrawingState _ _ _ _ _ _ b _) _ <- S.get 
+  StateStack (DrawingState _ _ _ _ _ _ b _ _) _ <- S.get 
   return b
 
 -- | From the linew width we check if stroke must be disabled
@@ -193,13 +203,18 @@ setTrokeState :: Double -> DrawS ()
 setTrokeState w = do 
   let st | w == 0 = False 
          | otherwise = True
-  StateStack (DrawingState fsl fw fs wr p b _ ilp) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw fs wr p b st ilp) l
+  StateStack (DrawingState fsl fw fs wr p b _ ilp shade) l <- S.get 
+  S.put $! StateStack (DrawingState fsl fw fs wr p b st ilp shade) l
 
 isALoop :: DrawS Bool 
 isALoop = do 
   StateStack s _ <- S.get
   return $ _isloop s
+
+getShading :: DrawS (Maybe PDFShading) 
+getShading = do 
+  StateStack s _ <- S.get
+  return $ _shading $  s
 
 setLoop :: Bool -> DrawS () 
 setLoop b = do 
@@ -214,20 +229,36 @@ setTranform d = do
      P.setWidth defaultWidth
      d
 
-strokeOrFill :: DrawS () 
-strokeOrFill = do 
+withShading :: Bool -> Maybe PDFShading -> DrawS () -> DrawS () -> DrawS () 
+withShading evenodd (Just shade) diag _ = do 
+  s <- S.get
+  let d' = S.evalStateT (unDS diag) s
+  drawM $ do 
+    withNewContext $ do 
+      d'
+      if evenodd 
+      then P.setAsClipPathEO
+      else P.setAsClipPath
+      P.applyShading shade
+withShading _ _ diag paint = do 
+  diag 
+  paint
+
+strokeOrFill :: DrawS () -> DrawS () 
+strokeOrFill r = do 
   mf <- mustFill
   ms <- mustStroke 
   fs <- getFillState
   isloop <- isALoop
+  sh <- getShading
   -- Set the diagram opacity in a new PDF context
   case (ms,mf,fs,isloop) of 
-       (True,True,Winding,True) -> drawM (P.fillAndStrokePath)
-       (True,True,EvenOdd,True) -> drawM (P.fillAndStrokePathEO)
-       (False,True,Winding,True) -> drawM (P.fillPath)
-       (False,True,EvenOdd,True) -> drawM (P.fillPathEO)
-       (True,_,_,_) -> drawM (P.strokePath) 
-       (_,_,_,_) -> return ()
+       (True,True,Winding,True) -> withShading False sh r $ drawM (P.fillAndStrokePath)
+       (True,True,EvenOdd,True) -> withShading True sh r $ drawM (P.fillAndStrokePathEO)
+       (False,True,Winding,True) -> withShading False sh r $ drawM (P.fillPath)
+       (False,True,EvenOdd,True) -> withShading True sh r $ drawM (P.fillPathEO)
+       (True,_,_,_) -> r >> drawM (P.strokePath) 
+       (_,_,_,_) -> r >> return ()
   setLoop True
 
 instance Backend Pdf R2 where
@@ -253,8 +284,7 @@ instance Backend Pdf R2 where
           pdfFrozenStyle s
           when (mf || ms) $ do 
             withPdfOpacity s $ do
-               r
-               strokeOrFill
+               strokeOrFill r
 
   doRender _ _ (D r) = setTranform (runDS r)
 
@@ -280,11 +310,12 @@ instance Backend Pdf R2 where
                                     ps = max (abs (xb - xa)) (abs (yb - ya))
                                     sx = w / ps
                                     sy = h / ps
+                                    s = min sx sy
                                     pageCenter = (w / 2.0) P.:+ (h/2.0)
                                 in
                                 do
                                   P.applyMatrix (P.translate pageCenter) 
-                                  P.applyMatrix (P.scale sx sy)
+                                  P.applyMatrix (P.scale s s)
                                   P.applyMatrix (P.translate $ (-vx) P.:+ (-vy))
                     rescaledD Nothing = return ()
                 rescaledD (getCorners bd)
@@ -363,11 +394,34 @@ pdfFillColor c = do
   setFillingColor a
 
 pdfStrokeColor :: (Real b, Floating b) => AlphaColour b -> DrawS ()
-pdfStrokeColor c = drawM $ do
-  let (r,g,b,a) = colorToSRGBA c
-  P.setStrokeAlpha a
-  P.strokeColor (Rgb r g b)
+pdfStrokeColor c = do
+  drawM $ do
+     let (r,g,b,a) = colorToSRGBA c
+     P.setStrokeAlpha a
+     P.strokeColor (Rgb r g b)
 
+setShadingData :: Maybe PDFShading -> DrawS () 
+setShadingData sh = do 
+  StateStack s l <- S.get
+  S.put $! StateStack (s {_shading = sh, _mustFill = _mustFill s || isJust sh}) l
+
+setShading :: PdfShadingData -> DrawS ()
+setShading (PdfAxialShadingData pa pb ca cb) = do 
+  let (ra,ga,ba,_) = colorToSRGBA ca
+      (rb,gb,bb,_) = colorToSRGBA cb 
+      colora = Rgb ra ga ba 
+      colorb = Rgb rb gb bb
+      (xa,ya) = unp2 pa 
+      (xb,yb) = unp2 pb 
+  setShadingData $ Just (AxialShading xa ya xb yb colora colorb)
+setShading (PdfRadialShadingData pa radiusa pb radiusb ca cb) = do 
+  let (ra,ga,ba,_) = colorToSRGBA ca
+      (rb,gb,bb,_) = colorToSRGBA cb 
+      colora = Rgb ra ga ba 
+      colorb = Rgb rb gb bb
+      (xa,ya) = unp2 pa 
+      (xb,yb) = unp2 pb 
+  setShadingData $ Just $ RadialShading xa ya radiusa xb yb radiusb colora colorb
 {-
 
 Conversions between diagrams and HPDF types
@@ -440,6 +494,7 @@ pdfMiscStyle s = do
                           , handle lColor
                           , handle lFillRule
                           , handle checklWidth
+                          , handle shading
                           ]
   where handle :: AttributeClass a => (a -> DrawS ()) -> Maybe (DrawS ())
         handle f = f `fmap` getAttr s
@@ -450,6 +505,7 @@ pdfMiscStyle s = do
         lColor c = pdfStrokeColor . toAlphaColour . getLineColor $ c
         fColor c = pdfFillColor . toAlphaColour . getFillColor $ c
         lFillRule = setFillRule . getFillRule
+        shading = setShading . getShadingData
         checklWidth w = do 
           let d = getLineWidth w
           setTrokeState d
@@ -534,20 +590,31 @@ Rendering of specific HPDF primitives
 
 -}
 
-instance Renderable TextBox Pdf where
-  render _ (TextBox t sw sh _ _ ls theText) = D $ do
+instance Renderable PdfTextBox Pdf where
+  render _ (PdfTextBox t sw sh _ _ ls theText) = D $ do
     withContext $ do
        pdfTransf t
        drawM (drawStringLabel ls theText 0 0 sw sh)
 
-pdfLabelWithSuggestedSize :: (Renderable TextBox Pdf,Renderable (Path R2) Pdf) 
-                          => LabelStyle 
-                          -> String 
-                          -> Double 
-                          -> Double 
-                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect
+-- | Typeset a text with a given style in a suggested box.
+-- The function is returning a diagram for the typeset text
+-- and a diagram for the bounding box which may be smaller
+-- than the suggested size : smaller width when the algorithm
+-- has done some line justification. 
+-- The text may also be bigger than the suggested width in case
+-- of overflow (similar to the way TeX is doing thing. There are
+-- settings in HPDF to control the elegance of the line cuts but
+-- those settings are not accessible from this simple API).
+-- The text will not be longer than the suggested height. In that
+-- case the additional text is not displayed.
+pdfLabelWithSuggestedSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+                          => LabelStyle -- ^ Style of the label
+                          -> String -- ^ String to display with this style
+                          -> Double -- ^ Suggested width
+                          -> Double -- ^ Suggested height
+                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
 pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h = 
-    let diag = mkQD (Prim (TextBox mempty w h wlinewrap hlinewrap ls s))
+    let diag = mkQD (Prim (PdfTextBox mempty w h wlinewrap hlinewrap ls s))
                     (getEnvelope r)
                     (getTrace r)
                     mempty
@@ -596,3 +663,46 @@ pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h =
         r = rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
         textBounds :: Diagram Pdf R2
         textBounds = Sh.rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
+
+instance Renderable PdfImage Pdf where
+  render _ (PdfImage t ref) = D $ do
+    withContext $ do
+       pdfTransf t
+       drawM . drawXObject $ ref 
+
+-- | Create an image diagram
+pdfImage :: (Monad m, PDFGlobals m)
+         => PDFReference PDFJpeg -- ^ Reference to the Jpeg image in the PDF resources
+         -> m (Diagram Pdf R2)
+pdfImage ref = do 
+    (w,h) <- P.bounds ref
+    let r :: Path R2
+        r = rect w h # moveOriginTo (p2 (-w/2, h/2.0))
+        diag = mkQD (Prim (PdfImage mempty ref))
+                    (getEnvelope r)
+                    (getTrace r)
+                    mempty
+                    (Query $ \p -> Any (isInsideEvenOdd p r))
+    return (diag # moveOriginTo (p2 (w/2.0,h/2.0)))
+
+instance Renderable PdfURL Pdf where
+  render _ (PdfURL t url w h) = D $ do
+    withContext $ do
+       pdfTransf t
+       drawM $ do 
+        newAnnotation (URLLink (toPDFString "diagrams link") [0,0,w,h] url True)
+
+-- | Create an URL diagram
+pdfURL :: String -- ^ URL
+       -> Double -- ^ Width of active area
+       -> Double -- ^ Height of active area
+       -> Diagram Pdf R2 
+pdfURL url w h = 
+  let r = rect w h # moveOriginTo (p2 (-w/2, h/2.0))
+      diag = mkQD (Prim (PdfURL mempty url w h))
+                    (getEnvelope r)
+                    (getTrace r)
+                    mempty
+                    (Query $ \p -> Any (isInsideEvenOdd p r))
+  in 
+  diag # moveOriginTo (p2 (w/2.0,h/2.0))
