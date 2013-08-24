@@ -8,7 +8,8 @@
 {-# LANGUAGE TypeSynonymInstances      #-}
 {-# LANGUAGE ViewPatterns              #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
-
+{-# LANGUAGE Rank2Types #-}
+{-# LANGUAGE UndecidableInstances #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Diagrams.Backend.Pdf
@@ -37,7 +38,9 @@ module Diagrams.Backend.Pdf
   , Options(..)
   , sizeFromSpec
   , pdfLabelWithSuggestedSize
+  , pdfTextWithSuggestedSize
   , pdfLabelWithSize
+  , pdfTextWithSize
   , LabelStyle(..)
   , TextOrigin(..)
   , LabelSize
@@ -296,7 +299,7 @@ instance Backend Pdf R2 where
   doRender _ _ (D r) = setTranform (runDS r)
 
   renderDia Pdf opts d =
-    centerAndScale d . doRender Pdf opts' . mconcat . map renderOne . prims $ d'
+    centerAndScale d' . doRender Pdf opts' . mconcat . map renderOne . prims $ d'
       where (opts', d') = adjustDia Pdf opts d
             renderOne :: (Prim Pdf R2, (Split (Transformation R2), Style R2))
                       -> Render Pdf R2
@@ -314,9 +317,9 @@ instance Backend Pdf R2 where
                                 let (vx,vy) = unp2 $ centroid [ll,ur]
                                     (xa,ya) = unp2 ll 
                                     (xb,yb) = unp2 ur 
-                                    ps = max (abs (xb - xa)) (abs (yb - ya))
-                                    sx = w / ps
-                                    sy = h / ps
+                                    --ps = max (abs (xb - xa)) (abs (yb - ya))
+                                    sx = w / (abs (xb - xa))
+                                    sy = h / abs (yb - ya)
                                     s = min sx sy
                                     pageCenter = (w / 2.0) P.:+ (h/2.0)
                                 in
@@ -696,20 +699,40 @@ pdfLabelWithSuggestedSize (LabelStyle fn fs j o fillc) s w h =
     paragraph $ do
         txt $ s)
 
+pdfTextWithSuggestedSize :: (ParagraphStyle ps s, P.Style s,Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+                         => TextOrigin -- ^ Text origin
+                         -> Double -- ^ Suggested width
+                         -> Double -- ^ Suggested height
+                         -> ps -- ^ Paragraph (vertical) style
+                         -> s  -- ^ Horizontal style
+                         -> TM ps s () -- ^ Text
+                         -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
+pdfTextWithSuggestedSize o w h ps hs tm = genericPdfText True o w h (AFP ps hs tm)
+
 pdfLabelWithSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
                  => LabelStyle -- ^ Style of the label
                  -> String -- ^ String to display with this style
                  -> Double -- ^ Suggested width
                  -> Double -- ^ Suggested height
-                 -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
+                 -> Diagram Pdf R2 -- ^ Text
 pdfLabelWithSize (LabelStyle fn fs j o fillc) s w h = 
   let pdfColor (r,g,b,_) = P.Rgb r g b
       pdffc = pdfColor . colorToSRGBA . toAlphaColour $ fillc 
   in
-  genericPdfText False o w h $ (AFP NormalParagraph (P.Font (PDFFont fn fs) pdffc pdffc) $ do 
+  fst $ genericPdfText False o w h $ (AFP NormalParagraph (P.Font (PDFFont fn fs) pdffc pdffc) $ do 
     setJustification j
     paragraph $ do
         txt $ s)
+
+pdfTextWithSize :: (ParagraphStyle ps s, P.Style s,Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+                => TextOrigin -- ^ Text origin
+                -> Double -- ^ Suggested width
+                -> Double -- ^ Suggested height
+                -> ps -- ^ Paragraph (vertical) style
+                -> s  -- ^ Horizontal style
+                -> TM ps s () -- ^ Text
+                -> Diagram Pdf R2 -- ^ Text
+pdfTextWithSize o w h ps hs tm = fst $ genericPdfText False o w h (AFP ps hs tm)
 
 instance Renderable PdfImage Pdf where
   render _ (PdfImage t ref) = D $ do
@@ -770,3 +793,23 @@ instance Transformable TransSh where
         (xa',ya') = unp2 . transform t $ p2 (xa,ya)
         (xb',yb') = unp2 . transform t $ p2 (xb,yb)
        
+{-
+
+Paragraph shapes 
+
+-}
+
+{-    
+data EnvelopedPara v = EnvelopedPara (Envelope R2) v
+
+instance ComparableStyle v => ComparableStyle (EnvelopedPara v) where 
+  isSameStyleAs (EnvelopedPara _ va) (EnvelopedPara _ vb) = isSameStyleAs va vb 
+
+instance (ComparableStyle v,P.Style s, ParagraphStyle v s) => ParagraphStyle (EnvelopedPara v) s where 
+   linePosition (EnvelopedPara _ v) = P.linePosition v
+   lineWidth (EnvelopedPara _ v) = P.lineWidth v
+   interline (EnvelopedPara _ v) = P.interline v
+   paragraphChange (EnvelopedPara a v) i l = let (np,r) = P.paragraphChange v i l in (EnvelopedPara a np,r)
+   paragraphStyle (EnvelopedPara _ v) = P.paragraphStyle v
+
+-}
