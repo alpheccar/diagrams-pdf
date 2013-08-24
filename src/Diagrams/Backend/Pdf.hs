@@ -229,23 +229,21 @@ setTranform d = do
      P.setWidth defaultWidth
      d
 
-withShading :: Bool -> Maybe PDFShading -> DrawS () -> DrawS () -> DrawS () 
-withShading evenodd (Just shade) diag _ = do 
-  s <- S.get
-  let d' = S.evalStateT (unDS diag) s
-  drawM $ do 
-    withNewContext $ do 
-      d'
-      if evenodd 
-      then P.setAsClipPathEO
-      else P.setAsClipPath
-      P.applyShading shade
-withShading _ _ diag paint = do 
+withShading :: Transformation R2 -> Bool -> Maybe PDFShading -> DrawS () -> DrawS () -> DrawS () 
+withShading td evenodd (Just shade) diag _ = do 
+    withContext $ do 
+      diag
+      drawM $ do
+         if evenodd 
+         then P.setAsClipPathEO
+         else P.setAsClipPath
+         P.applyShading (unTrans $ transform td (TransSh shade))
+withShading _ _ _ diag paint = do 
   diag 
   paint
 
-strokeOrFill :: DrawS () -> DrawS () 
-strokeOrFill r = do 
+strokeOrFill :: Transformation R2 -> DrawS () -> DrawS () 
+strokeOrFill td r = do 
   mf <- mustFill
   ms <- mustStroke 
   fs <- getFillState
@@ -253,25 +251,21 @@ strokeOrFill r = do
   sh <- getShading
   -- Set the diagram opacity in a new PDF context
   case (ms,mf,fs,isloop) of 
-       (True,True,Winding,True) -> withShading False sh r $ drawM (P.fillAndStrokePath)
-       (True,True,EvenOdd,True) -> withShading True sh r $ drawM (P.fillAndStrokePathEO)
-       (False,True,Winding,True) -> withShading False sh r $ drawM (P.fillPath)
-       (False,True,EvenOdd,True) -> withShading True sh r $ drawM (P.fillPathEO)
+       (True,True,Winding,True) -> withShading td False sh r $ drawM (P.fillAndStrokePath)
+       (True,True,EvenOdd,True) -> withShading td True sh r $ drawM (P.fillAndStrokePathEO)
+       (False,True,Winding,True) -> withShading td False sh r $ drawM (P.fillPath)
+       (False,True,EvenOdd,True) -> withShading td True sh r $ drawM (P.fillPathEO)
        (True,_,_,_) -> r >> drawM (P.strokePath) 
        (_,_,_,_) -> r >> return ()
   setLoop True
 
-instance Backend Pdf R2 where
-  data Render  Pdf R2 = D (DrawS ())
-  type Result  Pdf R2 = Draw ()
-  data Options Pdf R2 = PdfOptions {
-      pdfsizeSpec :: SizeSpec2D
-    } deriving(Show)
-     
-  -- There is something I don't understand here with the frozen style.
-  -- On the tests it is working but I would not have put
-  -- the calls in this order ... so it must be checked later   
-  withStyle _ s t (D r) = D $ do
+-- | Perform a rendering operation with a local style.
+withStyle'     :: Style R2    -- ^ Style to use
+               -> Transformation R2  -- ^ Transformation to be applied to the style
+               -> Transformation R2 -- ^ Transformation that was applied to the diagram
+               -> Render Pdf R2 -- ^ Rendering operation to run
+               -> Render Pdf R2 -- ^ Rendering operation using the style locally
+withStyle' s t td (D r) = D $ do
     withContext $ do
        pdfMiscStyle s
        mf <- mustFill
@@ -284,7 +278,19 @@ instance Backend Pdf R2 where
           pdfFrozenStyle s
           when (mf || ms) $ do 
             withPdfOpacity s $ do
-               strokeOrFill r
+               strokeOrFill td r
+
+instance Backend Pdf R2 where
+  data Render  Pdf R2 = D (DrawS ())
+  type Result  Pdf R2 = Draw ()
+  data Options Pdf R2 = PdfOptions {
+      pdfsizeSpec :: SizeSpec2D
+    } deriving(Show)
+     
+  -- There is something I don't understand here with the frozen style.
+  -- On the tests it is working but I would not have put
+  -- the calls in this order ... so it must be checked later   
+  withStyle _ s t (D r) = withStyle' s t mempty (D r)
 
   doRender _ _ (D r) = setTranform (runDS r)
 
@@ -294,12 +300,12 @@ instance Backend Pdf R2 where
             renderOne :: (Prim Pdf R2, (Split (Transformation R2), Style R2))
                       -> Render Pdf R2
             renderOne (p, (M t,      s))
-              = withStyle Pdf s mempty (render Pdf (transform t p))
+              = withStyle' s mempty t (render Pdf (transform t p))
 
             renderOne (p, (t1 :| t2, s))
               -- Here is the difference from the default
               -- implementation: "t2" instead of "t1 <> t2".
-              = withStyle Pdf s t1 (render Pdf (transform t2 p))
+              = withStyle' s t1 t2 (render Pdf (transform t2 p))
             centerAndScale diag renderedDiagram  = do
                 let bd = boundingBox diag
                     (w,h) = sizeFromSpec (pdfsizeSpec opts)
@@ -706,3 +712,20 @@ pdfURL url w h =
                     (Query $ \p -> Any (isInsideEvenOdd p r))
   in 
   diag # moveOriginTo (p2 (w/2.0,h/2.0))
+
+
+-- To avoid an Orphan instance warning for Transformable PDFShading
+newtype TransSh =TransSh {unTrans :: PDFShading}
+
+type instance V TransSh = R2
+
+instance Transformable TransSh where 
+    transform t (TransSh (AxialShading xa ya xb yb ca cb)) = TransSh $ AxialShading xa' ya' xb' yb' ca cb 
+      where 
+        (xa',ya') = unp2 . transform t $ p2 (xa,ya)
+        (xb',yb') = unp2 . transform t $ p2 (xb,yb)
+    transform t (TransSh (RadialShading xa ya ra xb yb rb ca cb)) = TransSh $ RadialShading xa' ya' ra xb' yb' rb ca cb 
+      where 
+        (xa',ya') = unp2 . transform t $ p2 (xa,ya)
+        (xb',yb') = unp2 . transform t $ p2 (xb,yb)
+       

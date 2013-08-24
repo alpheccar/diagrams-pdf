@@ -95,6 +95,16 @@ testShading = square 100 # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue red 
 testRadialShading :: Diagram Pdf R2
 testRadialShading = square 100 # pdfRadialShading (p2 (0,0)) 20 (p2 (0,0)) 50 blue red  <> rect 600 400
 
+testShade = 
+   let loopyStar = fc red
+                 . mconcat . map (cubicSpline True)
+                 . pathVertices
+                 . star (StarSkip 3)
+                 $ regPoly 7 1
+       f d = hexagon 60 # fillRule Winding # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue red # rotate (d :: Deg)
+   in   square 50 
+        ||| hcat (map f [0,20,40,60,80,100,120,140,160])
+
 main = do
   Right jpgf <- readJpegFile "logo.jpg" 
   let rect = PDFRect 0 0 600 400
@@ -103,5 +113,5 @@ main = do
       page1 <- addPage Nothing
       drawWithPage page1 $ do
         --p <- pdfImage jpg
-        renderDia Pdf (PdfOptions (Dims 600 400)) $ (example4 :: Diagram Pdf R2)
+        renderDia Pdf (PdfOptions (Dims 600 400)) $ (testShade :: Diagram Pdf R2)
           --testpdftext
