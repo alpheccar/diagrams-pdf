@@ -37,6 +37,7 @@ module Diagrams.Backend.Pdf
   , Options(..)
   , sizeFromSpec
   , pdfLabelWithSuggestedSize
+  , pdfLabelWithSize
   , LabelStyle(..)
   , TextOrigin(..)
   , LabelSize
@@ -597,10 +598,10 @@ Rendering of specific HPDF primitives
 -}
 
 instance Renderable PdfTextBox Pdf where
-  render _ (PdfTextBox t sw sh _ _ ls theText) = D $ do
+  render _ (PdfTextBox t w h para) = D $ do
     withContext $ do
        pdfTransf t
-       drawM (drawStringLabel ls theText 0 0 sw sh)
+       drawM (drawStringLabel w h para)
 
 -- | Typeset a text with a given style in a suggested box.
 -- The function is returning a diagram for the typeset text
@@ -613,14 +614,15 @@ instance Renderable PdfTextBox Pdf where
 -- those settings are not accessible from this simple API).
 -- The text will not be longer than the suggested height. In that
 -- case the additional text is not displayed.
-pdfLabelWithSuggestedSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
-                          => LabelStyle -- ^ Style of the label
-                          -> String -- ^ String to display with this style
-                          -> Double -- ^ Suggested width
-                          -> Double -- ^ Suggested height
-                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
-pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h = 
-    let diag = mkQD (Prim (PdfTextBox mempty w h wlinewrap hlinewrap ls s))
+genericPdfText :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+               => Bool -- ^ Suggested size 
+               -> TextOrigin
+               -> Double -- ^ Suggested width
+               -> Double -- ^ Suggested height
+               -> AnyFormattedParagraph
+               -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
+genericPdfText suggested o w h formatted = 
+    let diag = mkQD (Prim (PdfTextBox mempty w h formatted))
                     (getEnvelope r)
                     (getTrace r)
                     mempty
@@ -658,10 +660,8 @@ pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h =
         
   where wlinewrap :: Double 
         hlinewrap :: Double
-        Rectangle (xa :+ ya) (xb :+ yb) = getTextBoundingBox 0 0 w h NormalParagraph (P.Font (PDFFont fn fs) P.black P.black) $ (do
-                                           setJustification j
-                                           paragraph $ do
-                                               txt $ s)
+        Rectangle (xa :+ ya) (xb :+ yb) | suggested = matchingContainerSize w h formatted
+                                        | otherwise = Rectangle (0 :+ 0) (w :+ h)
         wlinewrap = xb - xa
         hlinewrap = yb - ya
    
@@ -669,6 +669,47 @@ pdfLabelWithSuggestedSize ls@(LabelStyle fn fs j o _) s w h =
         r = rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
         textBounds :: Diagram Pdf R2
         textBounds = Sh.rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
+
+-- | Typeset a text with a given style in a suggested box.
+-- The function is returning a diagram for the typeset text
+-- and a diagram for the bounding box which may be smaller
+-- than the suggested size : smaller width when the algorithm
+-- has done some line justification. 
+-- The text may also be bigger than the suggested width in case
+-- of overflow (similar to the way TeX is doing thing. There are
+-- settings in HPDF to control the elegance of the line cuts but
+-- those settings are not accessible from this simple API).
+-- The text will not be longer than the suggested height. In that
+-- case the additional text is not displayed.
+pdfLabelWithSuggestedSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+                          => LabelStyle -- ^ Style of the label
+                          -> String -- ^ String to display with this style
+                          -> Double -- ^ Suggested width
+                          -> Double -- ^ Suggested height
+                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
+pdfLabelWithSuggestedSize (LabelStyle fn fs j o fillc) s w h = 
+  let pdfColor (r,g,b,_) = P.Rgb r g b
+      pdffc = pdfColor . colorToSRGBA . toAlphaColour $ fillc 
+  in
+  genericPdfText True o w h $ (AFP NormalParagraph (P.Font (PDFFont fn fs) pdffc pdffc) $ do 
+    setJustification j
+    paragraph $ do
+        txt $ s)
+
+pdfLabelWithSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
+                 => LabelStyle -- ^ Style of the label
+                 -> String -- ^ String to display with this style
+                 -> Double -- ^ Suggested width
+                 -> Double -- ^ Suggested height
+                 -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
+pdfLabelWithSize (LabelStyle fn fs j o fillc) s w h = 
+  let pdfColor (r,g,b,_) = P.Rgb r g b
+      pdffc = pdfColor . colorToSRGBA . toAlphaColour $ fillc 
+  in
+  genericPdfText False o w h $ (AFP NormalParagraph (P.Font (PDFFont fn fs) pdffc pdffc) $ do 
+    setJustification j
+    paragraph $ do
+        txt $ s)
 
 instance Renderable PdfImage Pdf where
   render _ (PdfImage t ref) = D $ do

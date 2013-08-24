@@ -70,6 +70,11 @@ t s x j =
     in 
     td # showOrigin # lw 0.03  <> rd
 
+tfs s x j = 
+    let (td, rd) = pdfLabelWithSize (LabelStyle Times_Roman 12 j x blue) s 50 50 
+    in 
+    td # showOrigin # lw 0.03  <> rd
+
 testpdftext = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
  where 
   simple = t "Top Left" BottomLeftCorner LeftJustification ||| square 50
@@ -79,9 +84,18 @@ testpdftext = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
                ===
                (t "Bottom Left" BottomLeftCorner LeftJustification ||| t "Bottom" BottomSide Centered ||| t "Bottom Right" BottomRightCorner RightJustification)
   
-        
+testpdftextsize = pad 1.1 . centerXY $ (centerXY squareText) <> square 200
+ where 
+  simple = tfs "Top Left" BottomLeftCorner LeftJustification ||| square 50
+  squareText = (tfs "Top Left" TopLeftCorner LeftJustification ||| tfs "Top" TopSide Centered ||| tfs "Top Right" TopRightCorner RightJustification)
+               ===
+               (tfs "Left" LeftSide LeftJustification ||| tfs "Center" Center Centered ||| tfs "Right" RightSide RightJustification)
+               ===
+               (tfs "Bottom Left" BottomLeftCorner LeftJustification ||| tfs "Bottom" BottomSide Centered ||| tfs "Bottom Right" BottomRightCorner RightJustification)
+  
+
   pt = circle 0.1 # fc red
-  t1 = pt <> t "Top Left" TopLeftCorner LeftJustification  <> rect 100 50
+  t1 = pt <> tfs "Top Left" TopLeftCorner LeftJustification  <> rect 100 50
 
 testPict p = ((p # showOrigin <> rect 60 57) ||| (square 100 # lc blue)) <> rect 600 400 <> pdfURL "http://www.alpheccar.org" 100 100
   <> t "Top Left" TopLeftCorner LeftJustification
@@ -113,5 +127,5 @@ main = do
       page1 <- addPage Nothing
       drawWithPage page1 $ do
         --p <- pdfImage jpg
-        renderDia Pdf (PdfOptions (Dims 600 400)) $ (testShade :: Diagram Pdf R2)
+        renderDia Pdf (PdfOptions (Dims 600 400)) $ (testpdftext :: Diagram Pdf R2)
           --testpdftext

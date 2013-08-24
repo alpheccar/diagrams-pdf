@@ -3,6 +3,7 @@
 {-# LANGUAGE FlexibleContexts          #-}
 {-# LANGUAGE DeriveDataTypeable        #-}
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
+{-# LANGUAGE ExistentialQuantification #-}
 module Diagrams.Backend.Pdf.Specific(
       LabelStyle(..)
     , PdfTextBox(..)
@@ -16,6 +17,8 @@ module Diagrams.Backend.Pdf.Specific(
     , getShadingData
     , pdfAxialShading
     , pdfRadialShading
+    , AnyFormattedParagraph(..)
+    , CanBeFormatted(..)
     ) where 
 
 import Graphics.PDF hiding(translate)
@@ -46,16 +49,13 @@ data LabelStyle = LabelStyle FontName LabelSize Justification TextOrigin (Colour
 data PdfTextBox = PdfTextBox { _transform :: T2 
                              , _suggestedWidth :: Double 
                              , _suggestedHeight :: Double 
-                             , _computedWidth :: Double 
-                             , _computedHeight :: Double
-                             , _style :: LabelStyle 
-                             , _text :: String
+                             , _paragraph :: AnyFormattedParagraph
                              }
 
 type instance V PdfTextBox = R2
 
 instance Transformable PdfTextBox where
-  transform t (PdfTextBox tt sw sh cw ch a s) = PdfTextBox (t <> tt) sw sh cw ch a s
+  transform t (PdfTextBox tt sw sh para) = PdfTextBox (t <> tt) sw sh para
 
 instance IsPrim PdfTextBox
 
@@ -95,45 +95,27 @@ instance HasOrigin PdfURL where
 instance Renderable PdfURL NullBackend where
   render _ _ = mempty
 
-drawStringLabel :: LabelStyle 
-                -> String 
+drawStringLabel :: PDFFloat 
                 -> PDFFloat 
-                -> PDFFloat 
-                -> PDFFloat 
-                -> PDFFloat 
+                -> AnyFormattedParagraph
                 -> Draw () 
-drawStringLabel (LabelStyle fn fs j _ fillc) s _ _ w h = do
-  let pdfColor (r,g,b,_) = P.Rgb r g b
-      pdffc = pdfColor . colorToSRGBA . toAlphaColour $ fillc 
-  typesetText w h NormalParagraph (P.Font (PDFFont fn fs) pdffc pdffc) $ do
-    setJustification j
-    paragraph $ do
-        txt $ s
+drawStringLabel w h para = typesetText w h para
 
-typesetText :: (ParagraphStyle ps s, P.Style s) 
-            => PDFFloat -- ^ width limit
-            -> PDFFloat -- ^ height limit
-            -> ps -- ^ default vertical style
-            -> s -- ^ Default horizontal style
-            -> TM ps s a -- ^ Typesetting monad
-            -> P.Draw ()
-typesetText w h ps p t = do
+data AnyFormattedParagraph = forall s ps. (ParagraphStyle ps s, P.Style s) => AFP ps s (TM ps s ())
+
+class CanBeFormatted m where 
+  putIntoContainer :: Double -> Double -> m -> Draw ()
+  matchingContainerSize :: Double -> Double -> m -> Rectangle
+
+instance CanBeFormatted AnyFormattedParagraph where 
+  putIntoContainer w h (AFP ps p t) = 
     let b = getBoxes ps p t
         sh = styleHeight p
         c = mkContainer 0 0 w h sh
         (d,_,_) = fillContainer (defaultVerState ps) c b
+    in 
     d
-
-getTextBoundingBox :: (ParagraphStyle ps s, P.Style s) 
-                   => PDFFloat -- ^ x
-                   -> PDFFloat -- ^ y
-                   -> PDFFloat -- ^ width limit
-                   -> PDFFloat -- ^ height limit
-                   -> ps -- ^ default vertical style
-                   -> s -- ^ Default horizontal style
-                   -> TM ps s a -- ^ Typesetting monad
-                   -> Rectangle
-getTextBoundingBox _ _ w h  ps p t = 
+  matchingContainerSize w h (AFP ps p t) = 
     let b = getBoxes ps p t
         sh = styleHeight p
         c = mkContainer 0 0 w h sh
@@ -141,6 +123,17 @@ getTextBoundingBox _ _ w h  ps p t =
     in 
     containerContentRectangle  c'
 
+typesetText :: PDFFloat -- ^ width limit
+            -> PDFFloat -- ^ height limit
+            -> AnyFormattedParagraph
+            -> P.Draw ()
+typesetText w h para = putIntoContainer w h para
+
+getTextBoundingBox :: PDFFloat -- ^ width limit
+                   -> PDFFloat -- ^ height limit
+                   -> AnyFormattedParagraph
+                   -> Rectangle
+getTextBoundingBox w h para  = matchingContainerSize w h para
 
 data PdfShadingData = PdfAxialShadingData P2 P2 (Colour Double) (Colour Double) 
                     | PdfRadialShadingData P2 Double P2 Double (Colour Double) (Colour Double) deriving (Show,Typeable)
