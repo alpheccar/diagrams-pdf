@@ -30,22 +30,34 @@
 --
 -- This IO action will write the specified file.
 --
+-- / Specific HPDF primitives /
+-- 
+-- For details about the use of the HPDF specific primitives, the file
+-- test.hs in this package can be used. You'll have to unpack the archive
+-- for this package.
 -----------------------------------------------------------------------------
 module Diagrams.Backend.Pdf
 
-  ( -- * Backend token
+  ( -- * PDF Backend 
+    -- ** Backend token
     Pdf(..)
+    -- ** Backend options
   , Options(..)
   , sizeFromSpec
+  -- * HPDF Specific primitives 
+  -- ** Text
+  , LabelStyle(..)
+  , TextOrigin(..)
+  , LabelSize
   , pdfLabelWithSuggestedSize
   , pdfTextWithSuggestedSize
   , pdfLabelWithSize
   , pdfTextWithSize
-  , LabelStyle(..)
-  , TextOrigin(..)
-  , LabelSize
+  -- ** Image
   , pdfImage
+  -- ** URL
   , pdfURL
+  -- ** Shading
   , pdfAxialShading
   , pdfRadialShading
   ) where
@@ -282,7 +294,7 @@ withStyle' s t td (D r) = D $ do
           pdfFrozenStyle s
           when (mf || ms) $ do 
             withPdfOpacity s $ do
-               strokeOrFill td r
+               strokeOrFill (td) r
 
 instance Backend Pdf R2 where
   data Render  Pdf R2 = D (DrawS ())
@@ -545,6 +557,15 @@ unP :: P2 -> Complex Double
 unP r = let (x,y) = unp2 r
  in (x :+ y)
 
+--showTrans :: Transformation R2 -> String 
+--showTrans t = show a1 ++ " " ++ show b1 ++ " " ++ show c1 ++ "\n" ++
+--              show a2 ++ " " ++ show b2 ++ " " ++ show c2 ++ "\n"
+--   where (a1,a2) = unr2 $ apply t unitX
+--         (b1,b2) = unr2 $ apply t unitY
+--         (c1,c2) = unr2 $ transl t
+
+--instance Show (Transformation R2) where 
+--  show = showTrans
 
 pdfTransf :: Transformation R2 -> DrawS ()
 pdfTransf t = drawM $ applyMatrix (Matrix a1 a2 b1 b2 c1 c2)
@@ -674,7 +695,7 @@ genericPdfText suggested o w h formatted =
         textBounds = Sh.rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
 
 -- | Typeset a text with a given style in a suggested box.
--- The function is returning a diagram for the typeset text
+-- The function is returning a diagram for the text
 -- and a diagram for the bounding box which may be smaller
 -- than the suggested size : smaller width when the algorithm
 -- has done some line justification. 
@@ -683,7 +704,8 @@ genericPdfText suggested o w h formatted =
 -- settings in HPDF to control the elegance of the line cuts but
 -- those settings are not accessible from this simple API).
 -- The text will not be longer than the suggested height. In that
--- case the additional text is not displayed.
+-- case the additional text is not displayed except perhaps partially the last
+-- line since no clipping is done.
 pdfLabelWithSuggestedSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
                           => LabelStyle -- ^ Style of the label
                           -> String -- ^ String to display with this style
@@ -699,6 +721,7 @@ pdfLabelWithSuggestedSize (LabelStyle fn fs j o fillc) s w h =
     paragraph $ do
         txt $ s)
 
+-- | Similar to the @pdfLabelWithSuggestedSize@ but supporting the full features of HPDF
 pdfTextWithSuggestedSize :: (ParagraphStyle ps s, P.Style s,Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
                          => TextOrigin -- ^ Text origin
                          -> Double -- ^ Suggested width
@@ -709,6 +732,9 @@ pdfTextWithSuggestedSize :: (ParagraphStyle ps s, P.Style s,Renderable PdfTextBo
                          -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
 pdfTextWithSuggestedSize o w h ps hs tm = genericPdfText True o w h (AFP ps hs tm)
 
+-- | Similar to the @pdfLabelWithSuggestedSize@ but here the size is forced and even
+-- if the bounding box of the text is smaller it will not be taken into account
+-- for the diagram envelope.
 pdfLabelWithSize :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
                  => LabelStyle -- ^ Style of the label
                  -> String -- ^ String to display with this style
@@ -724,6 +750,7 @@ pdfLabelWithSize (LabelStyle fn fs j o fillc) s w h =
     paragraph $ do
         txt $ s)
 
+-- | Similar to @pdfTextWithSuggestedSize@ but the size if forced and not just suggested
 pdfTextWithSize :: (ParagraphStyle ps s, P.Style s,Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf) 
                 => TextOrigin -- ^ Text origin
                 -> Double -- ^ Suggested width
@@ -763,7 +790,7 @@ instance Renderable PdfURL Pdf where
         newAnnotation (URLLink (toPDFString "diagrams link") [0,0,w,h] url True)
 
 -- | Create an URL diagram
-pdfURL :: String -- ^ URL
+pdfURL :: String -- ^ URL (in a next version it should be URI)
        -> Double -- ^ Width of active area
        -> Double -- ^ Height of active area
        -> Diagram Pdf R2 

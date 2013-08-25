@@ -43,7 +43,11 @@ data TextOrigin = Center
 
 type LabelSize = Int
 
--- | Alpha channel for color is not taken into account in the setting
+-- | Style for a label.
+-- It is not considered as an attribute but as a different primitive
+-- because internaly it is a complex text which can support several styles 
+-- in the same paragraph. 
+-- Label is just a convenience wrapper when the full features are not needed
 data LabelStyle = LabelStyle FontName LabelSize Justification TextOrigin (Colour Double)
 
 data PdfTextBox = PdfTextBox { _transform :: T2 

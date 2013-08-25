@@ -5,13 +5,17 @@ import Diagrams.Prelude
 import Diagrams.Backend.Pdf
 import Diagrams.Backend.Pdf.CmdLine
 import Data.Colour (withOpacity)
-import Graphics.PDF hiding(scale,red,green,blue,white,black,text,rotate,rect)
+import Graphics.PDF hiding(scale,red,green,blue,white,black,text,rotate,rect,stroke)
 import qualified Diagrams.Backend.SVG.CmdLine as S
 import qualified Diagrams.Example.Logo as L
 import           Diagrams.Coordinates ((&))
 import qualified Graphics.PDF.Typesetting as T
 import qualified Graphics.PDF as P
 import System.Random
+
+pageWidth = 600 
+pageHeight = 400 
+titleH = 50
 
 data MyParaStyles = Normal
                   | Bold
@@ -191,11 +195,11 @@ standardStyleTest = do
 complexText = 
   centerXY (fst (pdfTextWithSuggestedSize Center 400 200 NormalPara Normal standardStyleTest) 
     ===
-    strutY 40 
+    strutY 20 
     ===
     fst (pdfTextWithSuggestedSize Center 300 200 NormalPara Normal standardStyleTest) # rotate (20 :: Deg)
   )
-  <> rect 600 300
+  <> rect pageWidth (pageHeight - titleH)
 
 t s x j = 
     let (td, rd) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 12 j x blue) s 50 100 
@@ -207,7 +211,7 @@ tfs s x j =
     in 
     td # showOrigin # lw 0.03 
 
-testpdfsuggestedtextsize = pad 1.1 . centerXY $ (centerXY squareText) <> rect 600 300
+testpdfsuggestedtextsize = centerXY $ (centerXY squareText) <> rect pageWidth (pageHeight - titleH)
  where 
   squareText = (t "Top Left" TopLeftCorner LeftJustification ||| t "Top" TopSide Centered ||| t "Top Right" TopRightCorner RightJustification)
                ===
@@ -215,7 +219,7 @@ testpdfsuggestedtextsize = pad 1.1 . centerXY $ (centerXY squareText) <> rect 60
                ===
                (t "Bottom Left" BottomLeftCorner LeftJustification ||| t "Bottom" BottomSide Centered ||| t "Bottom Right" BottomRightCorner RightJustification)
   
-testpdftextsize = pad 1.1 . centerXY $ (centerXY squareText) <> rect 600 300
+testpdftextsize = centerXY $ (centerXY squareText) <> rect pageWidth (pageHeight - titleH)
  where 
   squareText = (tfs "Top Left" TopLeftCorner LeftJustification ||| tfs "Top" TopSide Centered ||| tfs "Top Right" TopRightCorner RightJustification)
                ===
@@ -248,41 +252,57 @@ testImage img =
     <> fst (pdfLabelWithSuggestedSize (LabelStyle Times_Roman 12 Centered Center blue) url 150 40)
 
 mkSection s sect = 
-    let (d,_) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 36 Centered Center blue) s 600 400 
+    let (d,_) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 36 Centered Center blue) s pageWidth pageHeight 
     in do
       page1 <- addPage Nothing
       drawWithPage page1 $ do
-        renderDia Pdf (PdfOptions (Dims 600 400)) d
+        renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) d
       sect
 
 page s d = header s === content d 
  where 
-  width = 600 
-  height = 400 
-  titleH = 50
   header s = 
-    let (d,_) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 24 Centered Center black) s width titleH 
+    let (d,_) = pdfLabelWithSuggestedSize (LabelStyle Times_Roman 24 Centered Center black) s pageWidth titleH 
     in 
-    d <> (rect width titleH # pdfAxialShading (p2 (-width/2,-titleH/2)) (p2 (width/2,titleH/2)) blue white) 
-  content d = (rect width (height - titleH) # lw 0) <> (centerXY d)
-
+    d <> (rect pageWidth titleH # pdfAxialShading (p2 (-pageWidth/2,-titleH/2)) (p2 (pageWidth/2,titleH/2)) blue white)
+  clipRect :: Path R2
+  clipRect =  rect pageWidth (pageHeight - titleH) 
+  clipRectDiag :: Diagram Pdf R2 
+  clipRectDiag = stroke clipRect
+  content d = (clipRectDiag # lw 0 <> (centerXY d)) # clipBy clipRect # withEnvelope clipRectDiag
+  
 
 mkPage :: String -> Diagram Pdf R2 -> PDF ()
 mkPage s d = do 
   page1 <- addPage Nothing
   drawWithPage page1 $ do
-        renderDia Pdf (PdfOptions (Dims 600 400)) $ page s d
+        renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) $ page s d
+
+testShadeFroz = do
+  page1 <- addPage Nothing
+  drawWithPage page1 $ do
+    renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) $ 
+        w 
+  where 
+    w :: Diagram Pdf R2 
+    w = rect pageWidth (pageHeight - titleH) <> centerXY (
+       square 100 # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue white
+       ===
+       square 100 # rotate (45 :: Deg) # freeze # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue white
+    
+        )
 
 main = do
   Right jpgf <- readJpegFile "logo.jpg" 
-  let theDocRect = PDFRect 0 0 600 400
-  runPdf "circle.pdf" (standardDocInfo { author=toPDFString "alpheccar", compressed = False}) theDocRect $ do
-      mkSection "HPDF Specific Primitives" $ do
-           jpg <- createPDFJpeg jpgf
-           image <- pdfImage jpg
-           mkPage "Test JPEG and URL" (testImage image)
-           mkPage "Test Shading" testShading
-           mkPage "Test Suggested Text Container Size" testpdfsuggestedtextsize
-           mkPage "Test Forced Text Container Size" testpdftextsize
-           mkPage "Text Complex Text" complexText
-
+  let theDocRect = PDFRect 0 0 pageWidth pageHeight
+  runPdf "demo.pdf" (standardDocInfo { author=toPDFString "alpheccar", compressed = False}) theDocRect $ do
+      testShadeFroz
+      --mkSection "HPDF Specific Primitives" $ do
+      --     jpg <- createPDFJpeg jpgf
+      --     image <- pdfImage jpg
+      --     mkPage "Test JPEG and URL" (testImage image)
+      --     mkPage "Test Shading" testShading
+      --     mkPage "Test Suggested Text Container Size" testpdfsuggestedtextsize
+      --     mkPage "Test Forced Text Container Size" testpdftextsize
+      --     mkPage "Text Complex Text" complexText
+--

@@ -32,9 +32,12 @@ Description:         This package provides a modular backend for rendering
                      .
                      Additional documentation can be found in the
                      README file distributed with the source tarball
+extra-source-files: test/test.hs, test/Makefile, test/logo.jpg
+
 Source-repository head
   type:     git
   location: http://github.com/alpheccar/diagrams-pdf
+
 
 library
   Exposed-modules:     Diagrams.Backend.Pdf
