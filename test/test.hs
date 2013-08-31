@@ -278,17 +278,13 @@ mkPage s d = do
   drawWithPage page1 $ do
         renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) $ page s d
 
-testShadeFroz = do
-  page1 <- addPage Nothing
-  drawWithPage page1 $ do
-    renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) $ 
-        w 
+testShadeFroz = w
   where 
     w :: Diagram Pdf R2 
     w = rect pageWidth (pageHeight - titleH) <> centerXY (
-       square 100 # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue white
+       square 100 # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue white # lw 1.0
        ===
-       square 100 # rotate (45 :: Deg) # freeze # pdfAxialShading (p2 (-50,-50)) (p2 (50,50)) blue white
+       square 50 # freeze # rotate (45 :: Deg) # scale 2 # pdfAxialShading (p2 (-40,-40)) (p2 (40,40)) blue yellow # lw 1.0
     
         )
 
@@ -308,14 +304,13 @@ main = do
   Right jpgf <- readJpegFile "logo.jpg" 
   let theDocRect = PDFRect 0 0 pageWidth pageHeight
   runPdf "demo.pdf" (standardDocInfo { author=toPDFString "alpheccar", compressed = False}) theDocRect $ do
-      --testShadeFroz
-      testOpacity
-      --mkSection "HPDF Specific Primitives" $ do
-      --     jpg <- createPDFJpeg jpgf
-      --     image <- pdfImage jpg
-      --     mkPage "Test JPEG and URL" (testImage image)
-      --     mkPage "Test Shading" testShading
-      --     mkPage "Test Suggested Text Container Size" testpdfsuggestedtextsize
-      --     mkPage "Test Forced Text Container Size" testpdftextsize
-      --     mkPage "Text Complex Text" complexText
+      mkSection "HPDF Specific Primitives" $ do
+           jpg <- createPDFJpeg jpgf
+           image <- pdfImage jpg
+           mkPage "Test JPEG and URL" (testImage image)
+           mkPage "Test Shading" testShading
+           mkPage "Test Suggested Text Container Size" testpdfsuggestedtextsize
+           mkPage "Test Forced Text Container Size" testpdftextsize
+           mkPage "Text Complex Text" complexText
+           mkPage "Test shading with freeze" testShadeFroz
 --

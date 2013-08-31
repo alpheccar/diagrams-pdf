@@ -78,7 +78,7 @@ import qualified Data.Foldable                 as F
 import           Data.Monoid.Split
 import qualified Control.Monad.State.Strict as S
 import Control.Monad.Trans(lift)
-import Diagrams.TwoD.Path
+import Diagrams.TwoD.Path 
 import Control.Monad(when)
 import Diagrams.Backend.Pdf.Specific
 import           Data.Typeable
@@ -93,6 +93,8 @@ import Control.Lens hiding(transform,(#),para)
 -- | This data declaration is simply used as a token to distinguish this rendering engine.
 data Pdf = Pdf
     deriving (Eq,Ord,Read,Show,Typeable)
+
+data FillingMode = NoFilling | Shading | ColorFilling deriving(Eq,Show)
 
 -- | The drawing state
 -- I should give a name to the different fields and use lens
@@ -109,10 +111,12 @@ data DrawingState = DrawingState { _fontSlant :: FontSlant
                                  , _fontSize :: Int
                                  , _fillRule :: FillRule 
                                  , _currentPoint :: P.Point 
-                                 , _mustFill :: Bool
+                                 , _fillingMode :: FillingMode
                                  , _mustStroke :: Bool
                                  , _isloop :: Bool
                                  , _shading :: Maybe PDFShading
+                                 , _strokeOpacity :: Double 
+                                 , _fillOpacity :: Double
                                }
 makeLenses ''DrawingState
 
@@ -133,7 +137,7 @@ defaultWidth = 0.01
 
 -- | Initial drawing state
 initState :: StateStack
-initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) False True True Nothing) []
+initState = StateStack (DrawingState FontSlantNormal FontWeightNormal 1 Winding (0 :+ 0) NoFilling True True Nothing 1.0 1.0) []
 
 
 -- | The drawing monad with state
@@ -182,15 +186,12 @@ setFillRule wr = current . fillRule .= wr
 savePoint :: P.Point -> DrawS () 
 savePoint p = current . currentPoint .= p
 
-getFillState :: DrawS FillRule 
-getFillState = use (current . fillRule)
-
 -- | From the alpha value of a fill color, we check if the filling must be disabled
-setFillingColor :: Double -> DrawS() 
-setFillingColor alpha = do 
-    let b | alpha /= 0.0 = True 
-          | otherwise = False
-    current . mustFill .= b
+checkFillingNeeded :: Double -> DrawS() 
+checkFillingNeeded alpha = do 
+    let b | alpha /= 0.0 = id 
+          | otherwise = const NoFilling
+    current . fillingMode %= b
 
 -- | From the linew width we check if stroke must be disabled
 setTrokeState :: Double -> DrawS () 
@@ -216,35 +217,59 @@ setTranform d = do
      P.setWidth defaultWidth
      d
 
-withShading :: Transformation R2 -> Bool -> Maybe PDFShading -> DrawS () -> DrawS () -> DrawS () 
-withShading td evenodd (Just shade) diag _ = do 
+withShading :: Transformation R2 
+            -> FillRule 
+            -> FillingMode 
+            -> Bool -- ^ Must stroke
+            -> Maybe PDFShading 
+            -> DrawS () 
+            -> DrawS ()
+withShading td evenodd Shading strokedRequested (Just shade)  drawCommands = do 
     withContext $ do 
-      diag
+      drawCommands
       drawM $ do
-         if evenodd 
+         if evenodd == EvenOdd
          then P.setAsClipPathEO
          else P.setAsClipPath
          P.applyShading (unTrans $ transform td (TransSh shade))
-withShading _ _ _ diag paint = do 
-  diag 
-  paint
+    when (strokedRequested) $ do 
+      drawCommands 
+      drawM (P.strokePath) 
+withShading _ _ Shading strokedRequested Nothing drawCommands = 
+    when (strokedRequested) $ do 
+      drawCommands 
+      drawM (P.strokePath)
+withShading _ Winding ColorFilling True _ drawCommands = do 
+  drawCommands 
+  drawM P.fillAndStrokePath
+withShading _ EvenOdd ColorFilling True _ drawCommands = do 
+  drawCommands 
+  drawM P.fillAndStrokePathEO
+withShading _ Winding ColorFilling False _ drawCommands = do 
+  drawCommands 
+  drawM P.fillPath
+withShading _ EvenOdd ColorFilling False _ drawCommands = do 
+  drawCommands 
+  drawM P.fillPathEO
+withShading _ _ NoFilling True _ drawCommands = do 
+  drawCommands 
+  drawM P.strokePath
+withShading _ _ NoFilling False _ _ = return ()
 
 strokeOrFill :: Transformation R2 -> DrawS () -> DrawS () 
-strokeOrFill td r = do 
-  mf <- use (current . mustFill)
-  ms <- use (current . mustStroke) 
-  fs <- getFillState
-  islooppath <- isALoop
+strokeOrFill td r = do
+  let whenNoLoop m = do
+        islooppath <- isALoop
+        if islooppath
+          then m
+          else return NoFilling 
+  fm <- whenNoLoop $ use (current . fillingMode)
+  sm <- use (current . mustStroke) 
+  fr <- use (current . fillRule)
   sh <- getShading
-  -- Set the diagram opacity in a new PDF context
-  case (ms,mf,fs,islooppath) of 
-       (True,True,Winding,True) -> withShading td False sh r $ drawM (P.fillAndStrokePath)
-       (True,True,EvenOdd,True) -> withShading td True sh r $ drawM (P.fillAndStrokePathEO)
-       (False,True,Winding,True) -> withShading td False sh r $ drawM (P.fillPath)
-       (False,True,EvenOdd,True) -> withShading td True sh r $ drawM (P.fillPathEO)
-       (True,_,_,_) -> r >> drawM (P.strokePath) 
-       (_,_,_,_) -> r >> return ()
+  withShading td fr fm sm sh r 
   setLoop True
+  return ()
 
 -- | Perform a rendering operation with a local style.
 withStyle'     :: Style R2    -- ^ Style to use
@@ -255,17 +280,16 @@ withStyle'     :: Style R2    -- ^ Style to use
 withStyle' s t td (D r) = D $ do
     withContext $ do
        pdfMiscStyle s
-       mf <- use (current . mustFill)
-       ms <- use (current . mustStroke)  
        -- Set the clip region into a new PDF context
        -- since it is the only way to restore the old clip region
        -- (by popping the PDF stack of contexts)
        pdfTransf t
-       withClip s $ do
+       withClip t s $ do
           pdfFrozenStyle s
-          when (mf || ms) $ do 
-            withPdfOpacity s $ do
-               strokeOrFill (td) r
+          diagramOpacity <- getDiagramOpacity s
+          use (current . strokeOpacity) >>= drawM . P.setStrokeAlpha . (* diagramOpacity)
+          use (current . fillOpacity) >>= drawM . P.setFillAlpha . (* diagramOpacity)
+          strokeOrFill (td) r
 
 instance Backend Pdf R2 where
   data Render  Pdf R2 = D (DrawS ())
@@ -354,18 +378,6 @@ moveToAndSave p = do
 renderC :: (Renderable a Pdf, V a ~ R2) => a -> DrawS ()
 renderC a = case render Pdf a of D r -> r
 
-{-
-push :: DrawS()
-push = do 
-  StateStack c l <- S.get 
-  S.put $! (StateStack c (c:l))
-
-pop :: DrawS()
-pop = do 
-  StateStack _ l <- S.get 
-  S.put $! (StateStack (head l) (tail l))
--}
-
 -- | With a new context do something
 -- It is a bit comlex because the withNewContext from the HPDF library
 -- must be used to push / pop a new PDF context
@@ -384,19 +396,22 @@ pdfFillColor c = do
   drawM $ do
       P.setFillAlpha a
       P.fillColor (Rgb r g b)
-  setFillingColor a
+  current . fillingMode .= ColorFilling
+  checkFillingNeeded a
+  current . fillOpacity .= a
 
 pdfStrokeColor :: (Real b, Floating b) => AlphaColour b -> DrawS ()
 pdfStrokeColor c = do
+  let (r,g,b,a) = colorToSRGBA c
   drawM $ do
-     let (r,g,b,a) = colorToSRGBA c
      P.setStrokeAlpha a
      P.strokeColor (Rgb r g b)
+  current . strokeOpacity .= a
 
 setShadingData :: Maybe PDFShading -> DrawS () 
 setShadingData sh = do 
   current . shading .= sh 
-  current . mustFill %= (\t -> t || isJust sh)
+  current . fillingMode %= \x -> if isJust sh then Shading else x
 
 setShading :: PdfShadingData -> DrawS ()
 setShading (PdfAxialShadingData pa pb ca cb) = do 
@@ -443,38 +458,36 @@ attributes
 
 -}
 
-withPdfOpacity :: Style v -> DrawS a -> DrawS a 
-withPdfOpacity s m = do 
+getDiagramOpacity :: Style v -> DrawS Double
+getDiagramOpacity s = do 
      let mo = handle s getOpacity
      case mo of 
-      Nothing -> m 
-      Just d -> do 
-        withContext $ do 
-          drawM (setStrokeAlpha d >> setFillAlpha d) 
-          m
+      Nothing -> return 1.0 
+      Just d -> return d
 
   where handle :: AttributeClass a => Style v -> (a -> b) -> Maybe b
         handle st f = f `fmap` getAttr st
 
-withClip :: Style v -> DrawS () -> DrawS ()
-withClip s m = do 
-     let d = handle s m clip
+withClip :: Transformation R2 -> Style v -> DrawS () -> DrawS ()
+withClip t s m = do 
+     let d = handle s m
      case d of 
        Just r -> r 
        Nothing -> m
 
-  where handle :: AttributeClass a => Style v -> DrawS () -> (DrawS () -> a -> b) -> Maybe b
-        handle st dm f = f dm `fmap` getAttr st
-        clip dm = clipPath dm . getClip
+  where handle :: Style v -> DrawS () -> Maybe (DrawS ())
+        handle st dm = (clipPath dm . getClip) `fmap` getAttr st
         addPathToClip p = do 
           renderC p 
-          f <- getFillState 
+          f <- use (current . fillRule) 
           case f of 
                Winding -> drawM (setAsClipPath)
                EvenOdd -> drawM (setAsClipPathEO)
         clipPath dm p = do 
           withContext $ do 
+            pdfTransf ( inv t)
             mapM_ addPathToClip p 
+            pdfTransf (t)
             dm
 
 

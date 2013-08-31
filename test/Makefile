@@ -8,4 +8,4 @@ clean:
 	rm -f *.pdf
 
 run:
-	./mytest --compressed -o circle.pdf
+	./mytest 
