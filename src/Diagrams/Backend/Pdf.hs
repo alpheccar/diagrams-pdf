@@ -10,6 +10,7 @@
 {-# LANGUAGE GeneralizedNewtypeDeriving #-}
 {-# LANGUAGE Rank2Types #-}
 {-# LANGUAGE UndecidableInstances #-}
+{-# LANGUAGE TemplateHaskell #-}
 -----------------------------------------------------------------------------
 -- |
 -- Module      :  Diagrams.Backend.Pdf
@@ -83,6 +84,7 @@ import Diagrams.Backend.Pdf.Specific
 import           Data.Typeable
 import qualified Diagrams.TwoD.Shapes as Sh
 import Data.Maybe(isJust)
+import Control.Lens hiding(transform,(#),para)
 
 --import Debug.Trace as T
 
@@ -112,11 +114,13 @@ data DrawingState = DrawingState { _fontSlant :: FontSlant
                                  , _isloop :: Bool
                                  , _shading :: Maybe PDFShading
                                }
+makeLenses ''DrawingState
 
 -- | The stack of drawing state
 data StateStack = StateStack { _current :: DrawingState
                              , _last :: [DrawingState]
                              }
+makeLenses ''StateStack
 
 defaultFontSize :: Num a => a
 defaultFontSize = 1 
@@ -149,93 +153,60 @@ runDS :: DrawS a -> Draw a
 runDS d = S.evalStateT (unDS d) initState
 
 -- | Generate an HPDF font
-mkFont :: DrawingState -> PDFFont 
-mkFont (DrawingState FontSlantNormal FontWeightNormal s _ _ _ _ _ _) = PDFFont Times_Roman s
-mkFont (DrawingState FontSlantNormal FontWeightBold s _ _ _ _ _ _) = PDFFont Times_Bold s
-mkFont (DrawingState FontSlantItalic FontWeightNormal s _ _ _ _ _ _) = PDFFont Times_Italic s
-mkFont (DrawingState FontSlantItalic FontWeightBold s _ _ _ _ _ _) = PDFFont Times_BoldItalic s
-mkFont (DrawingState FontSlantOblique FontWeightNormal s _ _ _ _ _ _) = PDFFont Helvetica_Oblique s
-mkFont (DrawingState FontSlantOblique FontWeightBold s _ _ _ _ _ _) = PDFFont Helvetica_BoldOblique s
+mkFont :: (FontSlant,FontWeight,Int) -> PDFFont 
+mkFont (FontSlantNormal, FontWeightNormal, s) = PDFFont Times_Roman s
+mkFont (FontSlantNormal, FontWeightBold, s) = PDFFont Times_Bold s
+mkFont (FontSlantItalic, FontWeightNormal, s) = PDFFont Times_Italic s
+mkFont (FontSlantItalic, FontWeightBold, s) = PDFFont Times_BoldItalic s
+mkFont (FontSlantOblique, FontWeightNormal, s) = PDFFont Helvetica_Oblique s
+mkFont (FontSlantOblique, FontWeightBold, s) = PDFFont Helvetica_BoldOblique s
 
-
+extractFont :: DrawingState -> (FontSlant,FontWeight,Int)
+extractFont s = (s ^. fontSlant, s ^. fontWeight, s ^. fontSize)
 
 setFontSize :: Double -> DrawS ()
 setFontSize fs = do 
   let s = floor fs
-  StateStack (DrawingState fsl fw _ wr p f st ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw s wr p f st ilp shade) l
+  current . fontSize .= s
+  
 
 setFontWeight :: FontWeight -> DrawS ()
-setFontWeight w = do 
-  StateStack (DrawingState fsl _ fs wr p f st ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState fsl w fs wr p f st ilp shade) l
-  
+setFontWeight w = current . fontWeight .= w 
 
 setFontSlant :: FontSlant -> DrawS ()
-setFontSlant sl = do 
-  StateStack (DrawingState _ fw fs wr p f st ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
+setFontSlant sl = current . fontSlant .= sl 
   
 setFillRule :: FillRule -> DrawS ()
-setFillRule wr = do 
-  StateStack (DrawingState sl fw fs _ p f st ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
+setFillRule wr = current . fillRule .= wr 
 
 savePoint :: P.Point -> DrawS () 
-savePoint p = do 
-  StateStack (DrawingState sl fw fs wr _ f st ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState sl fw fs wr p f st ilp shade) l
-
-currentPoint :: DrawS P.Point 
-currentPoint = do 
-  StateStack (DrawingState _ _ _ _ p _ _ _ _) _ <- S.get 
-  return p 
+savePoint p = current . currentPoint .= p
 
 getFillState :: DrawS FillRule 
-getFillState = do 
-  StateStack (DrawingState _ _ _ w _ _ _ _ _) _ <- S.get 
-  return w
-
-mustFill :: DrawS Bool 
-mustFill = do
-  StateStack (DrawingState _ _ _ _ _ b _ _ _) _ <- S.get 
-  return b
+getFillState = use (current . fillRule)
 
 -- | From the alpha value of a fill color, we check if the filling must be disabled
 setFillingColor :: Double -> DrawS() 
 setFillingColor alpha = do 
     let b | alpha /= 0.0 = True 
           | otherwise = False
-    StateStack (DrawingState fsl w fs wr p _ st ilp shade) l <- S.get 
-    S.put $! StateStack (DrawingState fsl w fs wr p b st ilp shade) l
-
-mustStroke :: DrawS Bool
-mustStroke = do 
-  StateStack (DrawingState _ _ _ _ _ _ b _ _) _ <- S.get 
-  return b
+    current . mustFill .= b
 
 -- | From the linew width we check if stroke must be disabled
 setTrokeState :: Double -> DrawS () 
 setTrokeState w = do 
   let st | w == 0 = False 
          | otherwise = True
-  StateStack (DrawingState fsl fw fs wr p b _ ilp shade) l <- S.get 
-  S.put $! StateStack (DrawingState fsl fw fs wr p b st ilp shade) l
-
+  current . mustStroke .= st
+ 
 isALoop :: DrawS Bool 
-isALoop = do 
-  StateStack s _ <- S.get
-  return $ _isloop s
+isALoop = use (current . isloop)
 
 getShading :: DrawS (Maybe PDFShading) 
-getShading = do 
-  StateStack s _ <- S.get
-  return $ _shading $  s
+getShading = use (current . shading)
 
 setLoop :: Bool -> DrawS () 
-setLoop b = do 
-  StateStack s l <- S.get
-  S.put $! StateStack (s {_isloop = b}) l
+setLoop b = current . isloop .= b 
 
 -- | Initial settings before rendering the diagram
 setTranform :: Draw () -> Draw ()
@@ -260,13 +231,13 @@ withShading _ _ _ diag paint = do
 
 strokeOrFill :: Transformation R2 -> DrawS () -> DrawS () 
 strokeOrFill td r = do 
-  mf <- mustFill
-  ms <- mustStroke 
+  mf <- use (current . mustFill)
+  ms <- use (current . mustStroke) 
   fs <- getFillState
-  isloop <- isALoop
+  islooppath <- isALoop
   sh <- getShading
   -- Set the diagram opacity in a new PDF context
-  case (ms,mf,fs,isloop) of 
+  case (ms,mf,fs,islooppath) of 
        (True,True,Winding,True) -> withShading td False sh r $ drawM (P.fillAndStrokePath)
        (True,True,EvenOdd,True) -> withShading td True sh r $ drawM (P.fillAndStrokePathEO)
        (False,True,Winding,True) -> withShading td False sh r $ drawM (P.fillPath)
@@ -284,8 +255,8 @@ withStyle'     :: Style R2    -- ^ Style to use
 withStyle' s t td (D r) = D $ do
     withContext $ do
        pdfMiscStyle s
-       mf <- mustFill
-       ms <- mustStroke 
+       mf <- use (current . mustFill)
+       ms <- use (current . mustStroke)  
        -- Set the clip region into a new PDF context
        -- since it is the only way to restore the old clip region
        -- (by popping the PDF stack of contexts)
@@ -358,7 +329,7 @@ sizeFromSpec size = case size of
 -- | Relative lineto
 relativeLine :: P.Point -> DrawS ()
 relativeLine p = do 
-  c <- currentPoint 
+  c <- use (current . currentPoint) 
   let c' = p + c
   drawM (lineto c')
   savePoint c'
@@ -366,7 +337,7 @@ relativeLine p = do
 -- | Relative curveto
 relativeCurveTo :: P.Point -> P.Point -> P.Point -> DrawS () 
 relativeCurveTo x y z = do 
-  c <- currentPoint 
+  c <- use (current . currentPoint) 
   let x' = x + c 
       y' = y + c 
       z' = z + c 
@@ -424,8 +395,8 @@ pdfStrokeColor c = do
 
 setShadingData :: Maybe PDFShading -> DrawS () 
 setShadingData sh = do 
-  StateStack s l <- S.get
-  S.put $! StateStack (s {_shading = sh, _mustFill = _mustFill s || isJust sh}) l
+  current . shading .= sh 
+  current . mustFill %= (\t -> t || isJust sh)
 
 setShading :: PdfShadingData -> DrawS ()
 setShading (PdfAxialShadingData pa pb ca cb) = do 
@@ -516,7 +487,7 @@ pdfMiscStyle s = do
                           , handle lColor
                           , handle lFillRule
                           , handle checklWidth
-                          , handle shading
+                          , handle theShading
                           ]
   where handle :: AttributeClass a => (a -> DrawS ()) -> Maybe (DrawS ())
         handle f = f `fmap` getAttr s
@@ -527,7 +498,7 @@ pdfMiscStyle s = do
         lColor c = pdfStrokeColor . toAlphaColour . getLineColor $ c
         fColor c = pdfFillColor . toAlphaColour . getFillColor $ c
         lFillRule = setFillRule . getFillRule
-        shading = setShading . getShadingData
+        theShading = setShading . getShadingData
         checklWidth w = do 
           let d = getLineWidth w
           setTrokeState d
@@ -600,7 +571,7 @@ instance Renderable Text Pdf where
   render _ (Text tr al str) = 
       D $ withContext $ do
             StateStack f _ <- S.get 
-            let theFont = mkFont f
+            let theFont = mkFont . extractFont $ f
                 tw = textWidth theFont (toPDFString str) 
                 descent = getDescent theFont 
                 fontHeight = getHeight theFont 

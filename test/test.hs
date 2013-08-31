@@ -292,11 +292,24 @@ testShadeFroz = do
     
         )
 
+testOpacity = do 
+  page1 <- addPage Nothing
+  drawWithPage page1 $ do
+    renderDia Pdf (PdfOptions (Dims pageWidth pageHeight)) $ w
+  where 
+      w :: Diagram Pdf R2 
+      w = 
+        let colors  = map (blue `withOpacity`) [0.1, 0.2 .. 1.0]
+            colorss  = map (black `withOpacity`) [0.1, 0.2 .. 1.0]
+        in  hcat' with { catMethod = Distrib, sep = 1 }
+                  (zipWith3 (\cs cl c -> fcA cs $ c) colors colorss (repeat (circle 1)))
+  
 main = do
   Right jpgf <- readJpegFile "logo.jpg" 
   let theDocRect = PDFRect 0 0 pageWidth pageHeight
   runPdf "demo.pdf" (standardDocInfo { author=toPDFString "alpheccar", compressed = False}) theDocRect $ do
-      testShadeFroz
+      --testShadeFroz
+      testOpacity
       --mkSection "HPDF Specific Primitives" $ do
       --     jpg <- createPDFJpeg jpgf
       --     image <- pdfImage jpg
