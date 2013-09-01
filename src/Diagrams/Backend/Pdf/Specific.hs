@@ -21,7 +21,7 @@ module Diagrams.Backend.Pdf.Specific(
     , CanBeFormatted(..)
     ) where 
 
-import Graphics.PDF hiding(translate)
+import Graphics.PDF hiding(translate,Point)
 import qualified Graphics.PDF as P
 import Diagrams.Prelude
 import Data.Typeable
@@ -54,12 +54,13 @@ data PdfTextBox = PdfTextBox { _transform :: T2
                              , _suggestedWidth :: Double 
                              , _suggestedHeight :: Double 
                              , _paragraph :: AnyFormattedParagraph
+                             , _pos :: R2
                              }
 
 type instance V PdfTextBox = R2
 
 instance Transformable PdfTextBox where
-  transform t (PdfTextBox tt sw sh para) = PdfTextBox (t <> tt) sw sh para
+  transform t (PdfTextBox tt sw sh para pos) = PdfTextBox (t <> tt) sw sh para pos
 
 instance IsPrim PdfTextBox
 

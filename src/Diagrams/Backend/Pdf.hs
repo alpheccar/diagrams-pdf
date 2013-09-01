@@ -64,7 +64,7 @@ module Diagrams.Backend.Pdf
   ) where
 
 
-import  Graphics.PDF hiding(transform,Style,translate,scale)
+import  Graphics.PDF hiding(transform,Style,translate,scale,Point)
 import qualified Graphics.PDF as P
 
 import           Diagrams.Prelude
@@ -606,9 +606,10 @@ Rendering of specific HPDF primitives
 -}
 
 instance Renderable PdfTextBox Pdf where
-  render _ (PdfTextBox t w h para) = D $ do
+  render _ (PdfTextBox t w h para pos) = D $ do
     withContext $ do
        pdfTransf t
+       pdfTransf (translation pos)
        drawM (drawStringLabel w h para)
 
 -- | Typeset a text with a given style in a suggested box.
@@ -630,7 +631,7 @@ genericPdfText :: (Renderable PdfTextBox Pdf,Renderable (Path R2) Pdf)
                -> AnyFormattedParagraph
                -> (Diagram Pdf R2,Diagram Pdf R2) -- ^ Text and bounding rect of the typeset text
 genericPdfText suggested o w h formatted = 
-    let diag = mkQD (Prim (PdfTextBox mempty w h formatted))
+    let diag = mkQD (Prim (PdfTextBox mempty w h formatted textpos))
                     (getEnvelope r)
                     (getTrace r)
                     mempty
@@ -668,11 +669,25 @@ genericPdfText suggested o w h formatted =
         
   where wlinewrap :: Double 
         hlinewrap :: Double
-        Rectangle (xa :+ ya) (xb :+ yb) | suggested = matchingContainerSize w h formatted
+        computedRect@(Rectangle (sxa :+ sya) (sxb :+ syb)) = matchingContainerSize w h formatted
+        Rectangle (xa :+ ya) (xb :+ yb) | suggested = computedRect
                                         | otherwise = Rectangle (0 :+ 0) (w :+ h)
         wlinewrap = xb - xa
         hlinewrap = yb - ya
-   
+        cw = sxb - sxa 
+        ch = syb - sya
+        textpos :: R2
+        textpos | not suggested = case o of 
+                                 LeftSide -> r2 (0, -h / 2.0 + ch / 2.0)
+                                 RightSide -> r2 (w - cw, -h / 2.0 + ch / 2.0)
+                                 Center -> r2 (w/2.0 - cw / 2.0, -h/2.0 + ch / 2.0)
+                                 TopSide -> r2 (w/2.0 - cw / 2.0,0)
+                                 BottomSide -> r2 (w/2.0 - cw / 2.0, -h + ch)
+                                 TopLeftCorner -> r2 (0,0)
+                                 BottomLeftCorner -> r2 (0,-h + ch)
+                                 TopRightCorner -> r2 (w - cw, 0)
+                                 BottomRightCorner -> r2 (w - cw,-h + ch)
+                | otherwise = r2 (0,0)
         r :: Path R2
         r = rect wlinewrap hlinewrap # moveOriginTo (p2 (-wlinewrap / 2.0,hlinewrap / 2.0))
         textBounds :: Diagram Pdf R2
